@@ -1,0 +1,22 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.103.1",
+    "fastapi>=0.136.1",
+    "great-expectations>=1.17.2",
+    "psycopg[binary]>=3.3.4",
+    "pydantic-settings>=2.14.1",
+    "sqlalchemy>=2.0.49",
+    "uvicorn>=0.47.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-mock>=3.15.1",
+    "ruff>=0.15.13",
+]
