@@ -635,9 +635,9 @@ Tasks:
 
 All of the following must be true before Day 2 begins:
 
-- [ ] Backend endpoints `/health`, `/tables`, `/tables/{name}`, `/tables/{name}/sample` all working.
-- [ ] Frontend Table Explorer fully interactive (error state, tab switching, URL persistence).
-- [ ] `dq` schema created; `dq.rules`, `dq.runs`, `dq.run_results` tables exist (ready for Day 2 writes).
-- [ ] Prompt templates committed.
-- [ ] `docs/ai-tools-usage.md` has at least one entry.
-- [ ] README 5-minute demo is reproducible.
+- [x] Backend endpoints `/health`, `/tables`, `/tables/{name}`, `/tables/{name}/sample` all working.
+- [x] Frontend Table Explorer fully interactive (error state, tab switching, URL persistence).
+- [x] `dq` schema created; `dq.rules`, `dq.runs`, `dq.run_results` tables exist (ready for Day 2 writes).
+- [x] Prompt templates committed.
+- [x] `docs/ai-tools-usage.md` has at least one entry.
+- [x] README 5-minute demo is reproducible.

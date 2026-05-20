@@ -158,14 +158,14 @@ From the spec's "Notes for candidates" — internalize when making design decisi
 Granular checklist mirroring spec's Day 1/2/3 outline. Update as work progresses.
 
 ### Day 1 — Foundation & Core AI Integration
-- [ ] Project infrastructure (uv, npm, Git, monorepo layout)
-- [ ] Backend skeleton (FastAPI app, config, CORS, `/health`)
-- [ ] Database connectivity (`services/db.py` with Supabase Session Pooler)
-- [ ] Schema + seed data (`db/schema.sql`, `db/seed.sql` with intentional DQ issues)
-- [ ] AI prompt templates (`prompts/rule_from_schema.md`, `prompts/rule_from_nl.md`)
-- [ ] Initial API endpoints (`GET /tables/`, `GET /tables/{name}/sample`)
-- [ ] Frontend scaffold (Next.js 16 + Tailwind v4)
-- [ ] Frontend Table Explorer (sidebar + detail page, loading skeletons)
+- [x] Project infrastructure (uv, npm, Git, monorepo layout)
+- [x] Backend skeleton (FastAPI app, config, CORS, `/health`)
+- [x] Database connectivity (`services/db.py` with Supabase Session Pooler)
+- [x] Schema + seed data (`db/schema.sql`, `db/seed.sql` with intentional DQ issues)
+- [x] AI prompt templates (`prompts/rule_from_schema.md`, `prompts/rule_from_nl.md`)
+- [x] Initial API endpoints (`GET /tables/`, `GET /tables/{name}/sample`)
+- [x] Frontend scaffold (Next.js 16 + Tailwind v4)
+- [x] Frontend Table Explorer (sidebar + detail page, loading skeletons)
 
 ### Day 2 — Core Functionality
 
