@@ -1,7 +1,7 @@
 """Pydantic models for GE expectation rules and suggestion/NL endpoints."""
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -55,7 +55,10 @@ class NlRuleClarification(BaseModel):
     question: str
 
 
-NlRuleResponse = NlRuleSuccess | NlRuleClarification
+NlRuleResponse = Annotated[
+    Union[NlRuleSuccess, NlRuleClarification],
+    Field(discriminator="type"),
+]
 
 
 class CreateRuleRequest(GeRule):
