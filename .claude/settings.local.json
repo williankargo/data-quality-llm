@@ -19,7 +19,10 @@
       "Bash(curl -s http://localhost:8000/tables/policyholders)",
       "Bash(curl -s http://localhost:8000/tables/policyholders/sample)",
       "Bash(curl *)",
-      "Bash(pkill -f \"uvicorn app.main:app --port 8000\")"
+      "Bash(pkill -f \"uvicorn app.main:app --port 8000\")",
+      "Bash(npm install *)",
+      "Read(//tmp/**)",
+      "Bash(kill %1)"
     ]
   }
 }
