@@ -13,10 +13,13 @@
       "Bash(npm run *)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
       "Bash(pkill -f \"next dev\")",
-      "Bash(git init *)",
-      "Bash(grep -v '^\\\\s*$')",
-      "Bash(git add *)",
-      "Bash(git submodule *)"
+      "Bash(echo \"Server PID: $!\")",
+      "Bash(curl -s http://localhost:8000/tables)",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s http://localhost:8000/tables/policyholders)",
+      "Bash(curl -s http://localhost:8000/tables/policyholders/sample)",
+      "Bash(curl *)",
+      "Bash(pkill -f \"uvicorn app.main:app --port 8000\")"
     ]
   }
 }

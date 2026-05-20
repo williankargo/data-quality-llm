@@ -87,4 +87,9 @@ def health_check() -> dict:
 
 app.include_router(health_router)
 
-# Phase 2 routers (tables, rules, results) are registered in later phases.
+# Phase 2: tables router
+from app.api.tables import router as tables_router  # noqa: E402
+
+app.include_router(tables_router)
+
+# Phase 2 routers (rules, results) are registered in later phases.
