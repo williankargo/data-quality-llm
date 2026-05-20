@@ -77,3 +77,31 @@ This loop creates a traceable chain: every line of code is linked to a Specifica
 - **Tool**: Claude Code `/commit` skill
 - **Task**: Stage and commit each phase's changes with a structured commit message linking to the phase and Specification
 - **Process value**: Each commit corresponds to exactly one verified phase — the git log mirrors the implementation plan, making it easy to bisect regressions or review scope
+
+---
+
+## Day 2 — Core Functionality
+
+### Phase 3 — GE Engine, Runs API, and Test Suite
+
+#### Implementation (implementer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **implementer agent**
+- **Task**: `ge_engine.py`, `runs_store.py`, `api/results.py`, register `results_router`, `tests/test_runs.py`
+- **Outcome**: Endpoints functional; store layer tested against live Supabase (transaction-rollback isolation); GE engine tested via mock in endpoint tests
+
+#### Review — Coverage Gap Found (reviewer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **reviewer agent**
+- **Finding**: `GeEngine.run_rules` had no direct automated test coverage. The Specification required SQLite-backed GE smoke tests; the actual implementation mocked `GeEngine` at the endpoint layer and tested the store against live Supabase. The GE engine itself never executed in CI — the fail/error path was verified only by manual curl, leaving it non-reproducible.
+- **Verdict**: Approved with notes; flagged adding a real GeEngine SQLite smoke test (pass / fail / nonexistent-column → error) as a follow-up
+
+#### Bug Discovery During Fix (implementer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **implementer agent**
+- **Task**: Add the missing SQLite smoke tests for GeEngine
+- **Bug discovered**: GE 1.x does **not** raise a Python exception when a rule references a nonexistent column. It returns `success=False` with `exception_info.raised_exception=True` inside the result object. The original `ge_engine.py` only caught Python exceptions in a `try/except` block — so a rule pointing to a missing column was normalized as `status="fail"` (red) instead of `status="error"` (yellow), violating D#18's three-state semantic.
+- **Impact**: Wrong color shown to users. Red = data violates the rule; yellow = the rule itself is broken. Conflating them removes the user's ability to distinguish "go fix your data" from "go fix your rule."
+- **Decision**: Fix `ge_engine.py` — after every `batch.validate()`, inspect `exception_info.raised_exception`; if true, route to `_normalize_error` regardless of whether Python raised.
+- **Fix**: Added `_exception_was_raised` and `_first_exception_message` helpers that read `ge_result.exception_info`; `run_rules` now checks this before calling `_normalize_pass_fail`.
+- **Process value**: The smoke test requirement surfaced a real semantic bug that the happy-path tests would never have caught. The reviewer → implementer loop turned a documentation note into a production fix.

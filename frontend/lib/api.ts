@@ -13,16 +13,27 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiFetch<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`);
+interface FetchOptions {
+  method?: "GET" | "POST" | "PUT" | "DELETE";
+  body?: unknown;
+}
+
+export async function apiFetch<T = unknown>(path: string, options?: FetchOptions): Promise<T> {
+  const { method = "GET", body } = options ?? {};
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
   if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    const errData = body?.error ?? {
+    const bodyData = await res.json().catch(() => null);
+    const errData = bodyData?.error ?? {
       code: "INTERNAL_ERROR",
       user_message: "An unexpected error occurred. Please try again.",
       technical_detail: `HTTP ${res.status}`,
     };
     throw new ApiError(errData);
   }
+  if (res.status === 204) return {} as T;
   return res.json();
 }

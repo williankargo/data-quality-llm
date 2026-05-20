@@ -1,6 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { SchemaView } from "./SchemaView";
+import { RulesView } from "./RulesView";
 
 const TABS = ["schema", "rules", "results"] as const;
 type Tab = (typeof TABS)[number];
@@ -43,9 +44,7 @@ export function TableTabs({ name, activeTab }: TableTabsProps) {
       {/* Tab content */}
       <div className="flex-1 overflow-auto p-6">
         {tab === "schema" && <SchemaView name={name} />}
-        {tab === "rules" && (
-          <div className="text-gray-400 text-sm">Rule management coming in Day 2.</div>
-        )}
+        {tab === "rules" && <RulesView tableName={name} />}
         {tab === "results" && (
           <div className="text-gray-400 text-sm">Results dashboard coming in Day 2.</div>
         )}
