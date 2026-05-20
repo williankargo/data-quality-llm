@@ -22,7 +22,8 @@
       "Bash(pkill -f \"uvicorn app.main:app --port 8000\")",
       "Bash(npm install *)",
       "Read(//tmp/**)",
-      "Bash(kill %1)"
+      "Bash(kill %1)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

@@ -120,3 +120,7 @@ app.include_router(tables_router)
 from app.api.rules import router as rules_router  # noqa: E402
 
 app.include_router(rules_router)
+
+from app.api.results import router as results_router  # noqa: E402
+
+app.include_router(results_router)
