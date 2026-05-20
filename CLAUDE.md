@@ -170,26 +170,26 @@ Granular checklist mirroring spec's Day 1/2/3 outline. Update as work progresses
 ### Day 2 — Core Functionality
 
 **Backend**
-- [ ] `schemas/rules.py` — Pydantic models for GE expectation rules + suggestion/save requests
-- [ ] `services/ai_generator.py` — Anthropic client wrapper; load prompts; call LLM with structured output; validate against Pydantic
-- [ ] `api/rules.py` — `POST /rules/suggest`, `POST /rules/from-nl`, `GET/POST /rules`, `PUT/DELETE /rules/{id}`
-- [ ] Rules persistence — `dq.rules` table via `001_dq_schema.sql`; CRUD in `rules_store.py`
-- [ ] `services/ge_engine.py` — Great Expectations execution against Postgres; map JSON rules → GE Expectation objects
-- [ ] Runs persistence — `dq.runs` + `dq.run_results` tables; results cached in `runs_store.py`
-- [ ] `api/results.py` — `POST /runs`, `GET /runs/{id}`, `GET /runs/`
-- [ ] Register `rules` and `results` routers in `main.py`
+- [x] `schemas/rules.py` — Pydantic models for GE expectation rules + suggestion/save requests
+- [x] `services/ai_generator.py` — Anthropic client wrapper; load prompts; call LLM with structured output; validate against Pydantic
+- [x] `api/rules.py` — `POST /rules/suggest`, `POST /rules/from-nl`, `GET/POST /rules`, `PUT/DELETE /rules/{id}`
+- [x] Rules persistence — `dq.rules` table via `001_dq_schema.sql`; CRUD in `rules_store.py`
+- [x] `services/ge_engine.py` — Great Expectations execution against Postgres; map JSON rules → GE Expectation objects
+- [x] Runs persistence — `dq.runs` + `dq.run_results` tables; results cached in `runs_store.py`
+- [x] `api/results.py` — `POST /runs`, `GET /runs/{id}`, `GET /runs/`
+- [x] Register `rules` and `results` routers in `main.py`
 
 **Frontend**
-- [ ] Rule Management view (`/tables/[name]/rules`)
-  - [ ] Suggest button → `POST /rules/suggest`
-  - [ ] Natural-language input → `POST /rules/from-nl`
-  - [ ] Show GE config inline (expectation_type + kwargs per draft)
-  - [ ] Delete saved rule (Delete button per card, optimistic UI update)
-- [ ] Results Dashboard view (`/tables/[name]/results`)
-  - [ ] Run button → `POST /runs`
-  - [ ] List of expectations with red/green color coding
-  - [ ] Expand row → violating sample values and counts
-  - [ ] Re-run button (same "Run checks" button)
+- [x] Rule Management view (`/tables/[name]?tab=rules`)
+  - [x] Suggest button → `POST /rules/suggest`
+  - [x] Natural-language input → `POST /rules/from-nl`
+  - [x] Show GE config inline (expectation_type + kwargs per draft)
+  - [x] Delete saved rule (Delete button per card, optimistic UI update)
+- [x] Results Dashboard view (`/tables/[name]?tab=results`)
+  - [x] Run button → `POST /runs`
+  - [x] List of expectations with red/yellow/green color coding (three-state: pass/fail/error)
+  - [x] Expand row → violating sample values and counts
+  - [x] Re-run button (same "Run checks" button)
 
 ### Day 3 — Polish & Enhancement
 - [ ] Error handling: graceful UI for failed LLM call, DB timeout, GE crash
