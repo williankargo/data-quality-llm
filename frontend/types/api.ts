@@ -75,3 +75,35 @@ export interface CreateRuleRequest extends GeRule {
   table_name: string;
   source: RuleSource;
 }
+
+// ─── Run / result types ──────────────────────────────────────────────────────
+
+export type ResultStatus = "pass" | "fail" | "error";
+
+export interface RunResult {
+  id: number;
+  rule_id: number | null;
+  expectation_type: string;
+  status: ResultStatus;
+  success: boolean;
+  unexpected_count: number | null;
+  unexpected_sample: unknown[] | null;
+  observed_value: unknown | null;
+  error_message: string | null;
+}
+
+export interface RunSummary {
+  id: number;
+  table_name: string;
+  status: "success" | "failed";
+  started_at: string;
+  completed_at: string | null;
+  error_message: string | null;
+  pass_count: number;
+  fail_count: number;
+  error_count: number;
+}
+
+export interface RunDetail extends RunSummary {
+  results: RunResult[];
+}

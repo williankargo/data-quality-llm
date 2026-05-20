@@ -34,11 +34,9 @@ class GeEngine:
 
     def __init__(self) -> None:
         self.context = gx.get_context(mode="ephemeral")
-        # GE add_postgres expects plain postgresql:// not postgresql+psycopg://
-        pg_url = settings.DATABASE_URL.replace("postgresql+psycopg://", "postgresql://", 1)
         self.datasource = self.context.data_sources.add_postgres(
             name="dq_pg",
-            connection_string=pg_url,
+            connection_string=settings.DATABASE_URL,
         )
 
     def run_rules(self, table_name: str, rules: list[RuleRecord]) -> list[RunResult]:

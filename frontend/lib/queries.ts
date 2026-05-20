@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "./api";
-import type { TableInfo, TableDetail, SampleResponse, RuleRecord } from "../types/api";
+import type { TableInfo, TableDetail, SampleResponse, RuleRecord, RunSummary, RunDetail } from "../types/api";
 
 export const useTables = () =>
   useQuery({
@@ -27,4 +27,21 @@ export const useRules = (tableName: string) =>
     queryKey: ["rules", tableName],
     queryFn: () => apiFetch<RuleRecord[]>(`/rules?table_name=${encodeURIComponent(tableName)}`),
     enabled: !!tableName,
+  });
+
+export const useRunSummaries = (tableName: string) =>
+  useQuery({
+    queryKey: ["runs", tableName],
+    queryFn: () =>
+      apiFetch<RunSummary[]>(
+        `/runs?table_name=${encodeURIComponent(tableName)}&limit=1`
+      ),
+    enabled: !!tableName,
+  });
+
+export const useRunDetail = (runId: number | undefined) =>
+  useQuery({
+    queryKey: ["run", runId],
+    queryFn: () => apiFetch<RunDetail>(`/runs/${runId}`),
+    enabled: runId !== undefined,
   });
