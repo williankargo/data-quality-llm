@@ -88,6 +88,20 @@ _P_FINALIZE_RUN = "app.api.results.finalize_run"
 _P_GET_RUN = "app.api.results.get_run"
 _P_LIST_RUNS = "app.api.results.list_runs"
 _P_GE_ENGINE = "app.api.results.GeEngine"
+_P_EXECUTE_RUN = "app.api.results._execute_run"
+
+SAMPLE_RUNNING_DETAIL = RunDetail(
+    id=1,
+    table_name="policyholders",
+    status="running",
+    started_at=_NOW,
+    completed_at=None,
+    error_message=None,
+    pass_count=0,
+    fail_count=0,
+    error_count=0,
+    results=[],
+)
 
 
 # ---------------------------------------------------------------------------
@@ -173,76 +187,60 @@ def test_runs_store_failed_run(db_session):
 # ---------------------------------------------------------------------------
 
 
-def test_trigger_run_success():
-    """POST /runs returns RunDetail with 201 on success."""
-    mock_engine = MagicMock()
-    mock_engine.run_rules.return_value = [SAMPLE_RUN_RESULT]
-
+def test_trigger_run_returns_202():
+    """POST /runs immediately returns 202 with status='running' (D#23 async)."""
     with (
-        patch(_P_LIST_RULES, return_value=[SAMPLE_RULE]),
         patch(_P_CREATE_RUN, return_value=1),
-        patch(_P_GE_ENGINE, return_value=mock_engine),
-        patch(_P_WRITE_RESULT),
-        patch(_P_FINALIZE_RUN),
-        patch(_P_GET_RUN, return_value=SAMPLE_RUN_DETAIL),
+        patch(_P_GET_RUN, return_value=SAMPLE_RUNNING_DETAIL),
+        patch(_P_EXECUTE_RUN),  # prevent background task from running
     ):
         resp = client.post("/runs", json={"table_name": "policyholders"})
 
-    assert resp.status_code == 201
+    assert resp.status_code == 202
     data = resp.json()
     assert data["id"] == 1
-    assert data["status"] == "success"
-    assert data["pass_count"] == 1
-    assert len(data["results"]) == 1
-    assert data["results"][0]["status"] == "pass"
+    assert data["status"] == "running"
+    assert data["pass_count"] == 0
+    assert "results" not in data  # RunSummary serialization omits results
 
 
-def test_trigger_run_no_rules():
-    """POST /runs with no rules still creates a run and returns empty results."""
-    empty_detail = RunDetail(
+def test_trigger_run_no_rules_returns_202():
+    """POST /runs with no rules still creates a run and returns 202."""
+    empty_running = RunDetail(
         id=2,
         table_name="policyholders",
-        status="success",
+        status="running",
         started_at=_NOW,
-        completed_at=_NOW,
+        completed_at=None,
         error_message=None,
         pass_count=0,
         fail_count=0,
         error_count=0,
         results=[],
     )
-    mock_engine = MagicMock()
-    mock_engine.run_rules.return_value = []
 
     with (
-        patch(_P_LIST_RULES, return_value=[]),
         patch(_P_CREATE_RUN, return_value=2),
-        patch(_P_GE_ENGINE, return_value=mock_engine),
-        patch(_P_WRITE_RESULT),
-        patch(_P_FINALIZE_RUN),
-        patch(_P_GET_RUN, return_value=empty_detail),
+        patch(_P_GET_RUN, return_value=empty_running),
+        patch(_P_EXECUTE_RUN),
     ):
         resp = client.post("/runs", json={"table_name": "policyholders"})
 
-    assert resp.status_code == 201
-    assert resp.json()["results"] == []
+    assert resp.status_code == 202
+    assert resp.json()["status"] == "running"
 
 
-def test_trigger_run_ge_failure():
-    """POST /runs returns GE_EXECUTION_FAILED when GeEngine raises."""
-    mock_engine = MagicMock()
-    mock_engine.run_rules.side_effect = RuntimeError("connection error")
-
+def test_trigger_run_invalid_rule_ids():
+    """POST /runs with rule_ids not belonging to the table returns INVALID_RULE_IDS."""
     with (
-        patch(_P_LIST_RULES, return_value=[SAMPLE_RULE]),
+        patch(_P_LIST_RULES, return_value=[]),  # 0 matched vs 1 requested
         patch(_P_CREATE_RUN, return_value=1),
-        patch(_P_GE_ENGINE, return_value=mock_engine),
-        patch(_P_FINALIZE_RUN),
+        patch(_P_EXECUTE_RUN),
     ):
-        resp = client.post("/runs", json={"table_name": "policyholders"})
+        resp = client.post("/runs", json={"table_name": "policyholders", "rule_ids": [999]})
 
-    assert resp.status_code == 500
-    assert resp.json()["error"]["code"] == "GE_EXECUTION_FAILED"
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "INVALID_RULE_IDS"
 
 
 def test_fetch_run():

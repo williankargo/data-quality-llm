@@ -301,3 +301,56 @@ This loop creates a traceable chain: every line of code is linked to a Specifica
 
 - **Tool**: Claude Code `/commit` skill
 - **Commit**: `docs(day2-phase6): update usage log, README demo flow, and CLAUDE.md checklist`
+
+---
+
+## Day 3 — Polish & Enhancement
+
+### Phase 3 — Async Runs, Per-Rule Filter, and Polling UI
+
+#### Implementation (implementer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **implementer agent**
+- **Task**: Async run execution (D#23), per-rule filter (D#28), frontend polling UI
+- **Outcome**:
+  - `POST /runs` now returns HTTP 202 immediately after creating the run record; `BackgroundTasks` dispatches `_execute_run` which writes per-result rows incrementally via `progress_callback` and calls `finalize_run` with an atomic guard to prevent double-finalization
+  - `list_rules` in `rules_store.py` accepts an optional `rule_ids` list to filter which rules are executed in a run
+  - Frontend uses `refetchInterval` in `useRunDetail` to poll the active run every 1 s; polling stops automatically when `status !== 'running'`
+  - `RuleFilter` component (collapsible, collapsed by default) lets users select a subset of saved rules before triggering a run
+  - `tests/test_runs_async.py` added — 10 tests covering: 202 status, immediate `running` state, background completion, and invalid rule_ids rejection
+
+#### Review — Two Findings (reviewer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **reviewer agent**
+- **Finding 1**: The spec (day3-plan.md §3.5 Phase 3 Task 4) required a `「Running... N/total rules」` progress counter in the UI during `status='running'`. The implementation showed a generic spinner with no count.
+- **Finding 2**: `POST /runs` handler was annotated `-> RunDetail` but decorated with `response_model=RunSummary`. Serialization behavior was correct (FastAPI uses `response_model`), but the type hint misled readers and static analyzers.
+- **Verdict**: Conditional pass; both findings flagged as required fixes before commit
+
+#### Reviewer Findings Fixed (implementer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **implementer agent**
+- **Reviewer finding 1 fix**: `ResultsView.tsx` — the component already holds `rulesQuery` from `useRules(tableName)`. Added `rulesQuery.data?.length` as the total. Three display locations updated: the header status line, the initial spinner (no results yet), and the in-progress caption above the growing results list. When `rulesQuery.data` is not yet loaded, falls back to `{N} rules completed` format — no new query required.
+- **Reviewer finding 2 fix**: `results.py` line 50 — changed `-> RunDetail` to `-> RunSummary`. One-character-class change; no behavioral impact.
+- **Notable**: The `progress_callback` mechanism is what makes the N/total counter meaningful. Each rule writes its result to the DB as soon as GE finishes evaluating it; the frontend polls every 1 s and receives the partial `results` array. The counter reflects actual incremental progress — not a fake animation — because `run.results.length` grows by 1 each time a rule completes.
+
+#### Re-audit — Additional Findings (reviewer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **reviewer agent**
+- **Finding 1 (doc inaccuracy)**: The Implementation section stated the polling interval was 1.5 s. The actual code (`frontend/lib/queries.ts`) uses `1000` ms (1 s), matching the spec exactly.
+- **Finding 2 (doc overclaim)**: The Implementation section claimed `tests/test_runs_async.py` covered `finalize_run` atomic guard semantics, `list_rules` rule_ids filter at the store layer, and empty `rule_ids = []` behavior. None of the three assertions were present in the file.
+- **Verdict**: Conditional pass; both documentation inaccuracies required fixes before commit
+
+#### Findings Fixed — Round 2 (implementer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **implementer agent**
+- **Finding 1 fix**: Corrected "1.5 s" → "1 s" in the Implementation and Notable sections of this document.
+- **Finding 2 fix**: Added three tests to `tests/test_runs_async.py` (10 → 13 tests total):
+  - `test_finalize_run_atomic_guard` — integration test using `db_session`: creates a run, finalizes it as `'success'`, calls `finalize_run` again with `'failed'`, and verifies the second call is a no-op (status stays `'success'`, error_message unchanged). Directly asserts the `WHERE status = 'running'` guard in the SQL.
+  - `test_list_rules_empty_rule_ids_short_circuits` — unit test with a mock session: verifies `list_rules(session, rule_ids=[])` returns `[]` and never calls `session.execute`.
+  - `test_list_rules_filter_by_rule_ids` — integration test: inserts a rule via `create_rule`, then verifies `list_rules(rule_ids=[id])` returns only that rule, and `list_rules(rule_ids=[id+999999])` returns `[]`.
+
+#### Re-audit — Approved (reviewer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **reviewer agent**
+- **Verdict**: **Approved** — `uv run pytest tests/test_runs_async.py` passes with 13 tests; all three previously-missing assertions are now present; documentation interval corrected; no new scope creep introduced during the fix.
+

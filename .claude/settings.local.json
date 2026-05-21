@@ -23,7 +23,15 @@
       "Bash(npm install *)",
       "Read(//tmp/**)",
       "Bash(kill %1)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(git -C /Users/pinkuan/Projects/data-quality-llm/ diff HEAD -- backend/tests/test_runs.py frontend/components/ResultsView.tsx frontend/lib/mutations.ts frontend/lib/queries.ts)",
+      "Bash(xargs ls -la)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('status:', d['status']\\); print\\('result count:', len\\(d['results']\\)\\); print\\('rule_ids in results:', [r['rule_id'] for r in d['results']]\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('id:', d['id']\\); print\\('status:', d['status']\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('status:', d['status']\\); print\\('result count:', len\\(d['results']\\)\\); print\\('rule_ids:', [r['rule_id'] for r in d['results']]\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('error_message:', d.get\\('error_message', ''\\)[:200]\\)\")",
+      "Bash(git -C /Users/pinkuan/Projects/data-quality-llm/ diff HEAD -- frontend/types/api.ts)",
+      "Bash(git -C /Users/pinkuan/Projects/data-quality-llm/ log --oneline -- frontend/types/api.ts)"
     ]
   }
 }

@@ -39,9 +39,13 @@ export const useRunSummaries = (tableName: string) =>
     enabled: !!tableName,
   });
 
-export const useRunDetail = (runId: number | undefined) =>
+export const useRunDetail = (runId: number | null) =>
   useQuery({
     queryKey: ["run", runId],
     queryFn: () => apiFetch<RunDetail>(`/runs/${runId}`),
-    enabled: runId !== undefined,
+    enabled: runId != null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "running" ? 1000 : false;
+    },
   });

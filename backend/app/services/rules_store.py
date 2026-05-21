@@ -7,7 +7,7 @@ so that key ordering in kwargs JSONB does not affect comparison.
 
 import json
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from app.schemas.rules import GeRule, RuleDraft, RuleRecord
@@ -26,8 +26,19 @@ def _row_to_record(row) -> RuleRecord:
     )
 
 
-def list_rules(session: Session, table_name: str | None = None) -> list[RuleRecord]:
-    if table_name is not None:
+def list_rules(
+    session: Session,
+    table_name: str | None = None,
+    rule_ids: list[int] | None = None,
+) -> list[RuleRecord]:
+    if table_name is not None and rule_ids is not None:
+        if not rule_ids:
+            return []
+        sql = text(
+            "SELECT * FROM dq.rules WHERE table_name = :table_name AND id IN :rule_ids ORDER BY id"
+        ).bindparams(bindparam("rule_ids", expanding=True))
+        rows = session.execute(sql, {"table_name": table_name, "rule_ids": rule_ids}).fetchall()
+    elif table_name is not None:
         sql = text(
             "SELECT * FROM dq.rules WHERE table_name = :table_name ORDER BY id"
         )

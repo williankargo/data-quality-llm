@@ -41,7 +41,7 @@ def finalize_run(
         SET status        = :status,
             completed_at  = NOW(),
             error_message = :error_message
-        WHERE id = :run_id
+        WHERE id = :run_id AND status = 'running'
         """
     )
     session.execute(

@@ -6,6 +6,7 @@ import type {
   NlRuleResponse,
   RuleRecord,
   RunDetail,
+  RunSummary,
   SuggestResponse,
 } from "../types/api";
 
@@ -66,15 +67,17 @@ export const useNlRule = (tableName: string) => {
 export const useTriggerRun = (tableName: string) => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () =>
-      apiFetch<RunDetail>("/runs", {
+    mutationFn: (ruleIds?: number[]) =>
+      apiFetch<RunSummary>("/runs", {
         method: "POST",
-        body: { table_name: tableName },
+        body: {
+          table_name: tableName,
+          ...(ruleIds !== undefined ? { rule_ids: ruleIds } : {}),
+        },
       }),
     onSuccess: (data) => {
-      // Pre-seed detail cache so useRunDetail returns without a second fetch
-      queryClient.setQueryData(["run", data.id], data);
-      // Invalidate summary list so it refetches and surfaces the new run ID
+      // Seed detail cache with running summary so polling starts immediately
+      queryClient.setQueryData<RunDetail>(["run", data.id], { ...data, results: [] });
       queryClient.invalidateQueries({ queryKey: ["runs", tableName] });
     },
   });
