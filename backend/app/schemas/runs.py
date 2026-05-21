@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+RunStatus = Literal["running", "success", "failed"]
 ResultStatus = Literal["pass", "fail", "error"]
 
 
@@ -23,7 +24,7 @@ class RunResult(BaseModel):
 class RunSummary(BaseModel):
     id: int
     table_name: str
-    status: Literal["success", "failed"]
+    status: RunStatus
     started_at: datetime
     completed_at: datetime | None
     error_message: str | None
@@ -38,3 +39,4 @@ class RunDetail(RunSummary):
 
 class CreateRunRequest(BaseModel):
     table_name: str
+    rule_ids: list[int] | None = None  # D#28: omit to run all rules for the table

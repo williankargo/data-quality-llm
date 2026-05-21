@@ -92,10 +92,12 @@ export interface RunResult {
   error_message: string | null;
 }
 
+export type RunStatus = "running" | "success" | "failed";
+
 export interface RunSummary {
   id: number;
   table_name: string;
-  status: "success" | "failed";
+  status: RunStatus;
   started_at: string;
   completed_at: string | null;
   error_message: string | null;
@@ -106,4 +108,19 @@ export interface RunSummary {
 
 export interface RunDetail extends RunSummary {
   results: RunResult[];
+}
+
+// ─── Multi-turn NL chat (D#25) ───────────────────────────────────────────────
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+// ─── LLM failure explanation (D#30) ─────────────────────────────────────────
+
+export interface ExplainResponse {
+  explanation: string;
+  possible_causes: string[];
+  suggested_action: string;
 }

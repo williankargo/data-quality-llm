@@ -1,34 +1,5 @@
 import { ApiError } from "@/lib/api";
-
-const ERROR_CONFIG: Record<string, { title: string; causes: string[] }> = {
-  TABLE_NOT_FOUND: {
-    title: "Table Not Found",
-    causes: [
-      "The table name in the URL may be incorrect.",
-      "The table may have been deleted from the database.",
-    ],
-  },
-  DATABASE_UNAVAILABLE: {
-    title: "Database Unavailable",
-    causes: [
-      "The database server may be temporarily unavailable.",
-      "Your network connection may be unstable.",
-      "The backend service may not be running.",
-    ],
-  },
-  INTERNAL_ERROR: {
-    title: "Unexpected Error",
-    causes: [
-      "The backend service encountered an unexpected error.",
-      "Try refreshing the page or restarting the backend.",
-    ],
-  },
-};
-
-const DEFAULT_CONFIG = {
-  title: "Something Went Wrong",
-  causes: ["An unexpected error occurred. Please try again."],
-};
+import { getErrorMessage } from "@/lib/errorMessages";
 
 interface ErrorStateProps {
   error: ApiError;
@@ -36,7 +7,7 @@ interface ErrorStateProps {
 }
 
 export function ErrorState({ error, onRetry }: ErrorStateProps) {
-  const config = ERROR_CONFIG[error.code] ?? DEFAULT_CONFIG;
+  const config = getErrorMessage(error.code);
 
   return (
     <div className="rounded-lg border border-red-200 bg-red-50 p-6 max-w-lg">
@@ -46,7 +17,7 @@ export function ErrorState({ error, onRetry }: ErrorStateProps) {
           <h3 className="font-semibold text-red-800">{config.title}</h3>
           <p className="text-sm text-red-700 mt-1">{error.user_message}</p>
           <ul className="mt-3 space-y-1">
-            {config.causes.map((cause, i) => (
+            {config.possible_causes.map((cause, i) => (
               <li key={i} className="text-sm text-red-600 flex items-start gap-2">
                 <span>•</span>
                 <span>{cause}</span>

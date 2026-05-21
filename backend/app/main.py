@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.errors import CODE_MAP
 from app.config import settings
 from app.schemas.errors import ErrorDetail, ErrorEnvelope
 
@@ -45,32 +46,13 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     """
     # Maps detail string → (code, user_message).  All callers that raise a
     # domain-specific HTTPException must pass the code string as exc.detail.
-    detail_code_map: dict[str, tuple[str, str]] = {
-        "TABLE_NOT_FOUND": ("TABLE_NOT_FOUND", "Table not found."),
-        "RULE_NOT_FOUND": ("RULE_NOT_FOUND", "Rule not found."),
-        "RUN_NOT_FOUND": ("RUN_NOT_FOUND", "Run not found."),
-        "LLM_TIMEOUT": (
-            "LLM_TIMEOUT",
-            "The AI service did not respond in time, please try again.",
-        ),
-        "LLM_OUTPUT_INVALID": (
-            "LLM_OUTPUT_INVALID",
-            "The AI returned an invalid rule format, please retry.",
-        ),
-        "GE_EXECUTION_FAILED": (
-            "GE_EXECUTION_FAILED",
-            "Rule execution failed. Please check the table name or column settings.",
-        ),
-        "DATABASE_UNAVAILABLE": (
-            "DATABASE_UNAVAILABLE",
-            "Unable to connect to the database temporarily.",
-        ),
-    }
-
     detail_str = str(exc.detail) if exc.detail is not None else ""
-    code, user_message = detail_code_map.get(
-        detail_str, ("HTTP_ERROR", detail_str)
-    )
+    if detail_str in CODE_MAP:
+        code = detail_str
+        _, user_message = CODE_MAP[detail_str]
+    else:
+        code = "HTTP_ERROR"
+        user_message = detail_str
 
     envelope = ErrorEnvelope(
         error=ErrorDetail(
