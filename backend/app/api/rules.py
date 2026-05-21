@@ -55,7 +55,7 @@ def suggest_rules(
     columns = get_table_columns(db, body.table_name)
     rows = sample_table(db, body.table_name, limit=50)
     try:
-        raw_rules = ai.suggest_rules(body.table_name, columns, rows)
+        raw_rules = ai.suggest_rules(db, body.table_name, columns, rows)
     except anthropic.APITimeoutError:
         raise HTTPException(status_code=504, detail="LLM_TIMEOUT")
     except LlmOutputError:
@@ -71,7 +71,7 @@ def rule_from_nl(
     _require_table(body.table_name, db)
     columns = get_table_columns(db, body.table_name)
     try:
-        result = ai.rule_from_nl(body.table_name, columns, body.description)
+        result = ai.rule_from_nl(db, body.table_name, columns, body.description)
     except anthropic.APITimeoutError:
         raise HTTPException(status_code=504, detail="LLM_TIMEOUT")
     except LlmOutputError:

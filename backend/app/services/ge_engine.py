@@ -2,18 +2,23 @@
 
 Uses an ephemeral context (no GE file store) so all state lives in memory.
 DATABASE_URL dialect prefix is stripped before passing to GE (D#16).
+Rules are validated in parallel via ThreadPoolExecutor(max_workers=4) (D#29).
 """
 
 import re
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import great_expectations as gx
+from sqlalchemy.exc import OperationalError
 
 from app.config import settings
 from app.schemas.rules import RuleRecord
 from app.schemas.runs import ResultStatus, RunResult
 
 _RESULT_FORMAT = {"result_format": "SUMMARY", "partial_unexpected_count": 3}
+_MAX_WORKERS = 4
 
 
 def _snake_to_camel(name: str) -> str:
@@ -39,10 +44,16 @@ class GeEngine:
             connection_string=settings.DATABASE_URL,
         )
 
-    def run_rules(self, table_name: str, rules: list[RuleRecord]) -> list[RunResult]:
-        """Validate every rule against the table; return one RunResult per rule.
+    def run_rules(
+        self,
+        table_name: str,
+        rules: list[RuleRecord],
+        progress_callback: Callable[[RunResult], None] | None = None,
+    ) -> list[RunResult]:
+        """Validate every rule against the table in parallel; return one RunResult per rule.
 
-        Does not write to DB — caller (runs_store) is responsible for persistence.
+        progress_callback is invoked from the *calling* thread after each future
+        completes, so it is safe to use a shared SQLAlchemy Session inside it.
         """
         asset = self.datasource.add_table_asset(
             name=f"asset_{table_name}",
@@ -51,14 +62,26 @@ class GeEngine:
         batch_def = asset.add_batch_definition_whole_table(name=f"batch_{table_name}")
         batch = batch_def.get_batch()
 
-        results: list[RunResult] = []
-        for rule in rules:
+        def _run_one(rule: RuleRecord) -> RunResult:
             try:
                 expectation = self._build_expectation(rule.expectation_type, rule.kwargs)
-                ge_result = batch.validate(expectation, result_format=_RESULT_FORMAT)
-                results.append(self._normalize_pass_fail(rule, ge_result))
+                try:
+                    ge_result = batch.validate(expectation, result_format=_RESULT_FORMAT)
+                except OperationalError:
+                    # Retry once on connection-recycle errors from Supabase Session Pooler (D#29)
+                    ge_result = batch.validate(expectation, result_format=_RESULT_FORMAT)
+                return self._normalize_pass_fail(rule, ge_result)
             except Exception as exc:
-                results.append(self._normalize_error(rule, exc))
+                return self._normalize_error(rule, exc)
+
+        results: list[RunResult] = []
+        with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
+            futures = {pool.submit(_run_one, r): r for r in rules}
+            for future in as_completed(futures):
+                result = future.result()
+                results.append(result)
+                if progress_callback is not None:
+                    progress_callback(result)
         return results
 
     # ------------------------------------------------------------------

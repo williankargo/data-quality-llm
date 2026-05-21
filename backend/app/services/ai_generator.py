@@ -2,18 +2,28 @@
 
 Uses Tool Use (structured output) so every response is machine-readable.
 Pydantic validation runs after Tool Use as a second safety layer (D#7).
+LLM responses are cached in dq.llm_cache (D#24); bump PROMPT_VERSION_* here
+whenever the corresponding prompt template changes to invalidate stale entries.
 """
 
 import json
 from pathlib import Path
 
 import anthropic
+from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.schemas.rules import GeRule, NlRuleClarification, NlRuleResponse, NlRuleSuccess
 from app.schemas.tables import ColumnInfo
+from app.services.llm_cache import get_cached, make_cache_key, set_cached
 
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
+
+# Bump these whenever the corresponding prompt template file changes.
+# A version change invalidates all existing cache entries for that prompt path.
+PROMPT_VERSION_SCHEMA = "v1"
+PROMPT_VERSION_NL = "v1"      # bumped to "v2" in Phase 4 (multi-turn)
+PROMPT_VERSION_EXPLAIN = "v1"  # used in Phase 6
 
 
 class LlmOutputError(Exception):
@@ -100,10 +110,21 @@ class AiGenerator:
 
     def suggest_rules(
         self,
+        session: Session,
         table_name: str,
         columns: list[ColumnInfo],
         sample_rows: list[dict],
     ) -> list[GeRule]:
+        cache_key = make_cache_key(
+            "rule_from_schema",
+            PROMPT_VERSION_SCHEMA,
+            table_name=table_name,
+            columns=[c.model_dump() for c in columns],
+            sample=sample_rows[:20],
+        )
+        if (cached := get_cached(session, cache_key)) is not None:
+            return [GeRule.model_validate(r) for r in cached["rules"]]
+
         prompt = _load_template(
             "rule_from_schema.md",
             {
@@ -123,14 +144,32 @@ class AiGenerator:
             tool_choice={"type": "tool", "name": "propose_rules"},
             messages=[{"role": "user", "content": prompt}],
         )
-        return self._extract_and_validate_rules(response)
+        rules = self._extract_and_validate_rules(response)
+        set_cached(
+            session,
+            cache_key,
+            "rule_from_schema",
+            {"rules": [r.model_dump() for r in rules]},
+        )
+        return rules
 
     def rule_from_nl(
         self,
+        session: Session,
         table_name: str,
         columns: list[ColumnInfo],
         description: str,
     ) -> NlRuleResponse:
+        cache_key = make_cache_key(
+            "rule_from_nl",
+            PROMPT_VERSION_NL,
+            table_name=table_name,
+            columns=[c.model_dump() for c in columns],
+            description=description,
+        )
+        if (cached := get_cached(session, cache_key)) is not None:
+            return _nl_from_cache(cached)
+
         prompt = _load_template(
             "rule_from_nl.md",
             {
@@ -148,7 +187,9 @@ class AiGenerator:
             tool_choice={"type": "any"},
             messages=[{"role": "user", "content": prompt}],
         )
-        return self._dispatch_nl_response(response)
+        result = self._dispatch_nl_response(response)
+        set_cached(session, cache_key, "rule_from_nl", _nl_to_cache(result))
+        return result
 
     # ------------------------------------------------------------------
     # Private
@@ -179,3 +220,20 @@ class AiGenerator:
             return NlRuleClarification(question=tool_block.input["question"])
         except Exception as exc:
             raise LlmOutputError(str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Cache serialization helpers for NlRuleResponse discriminated union
+# ---------------------------------------------------------------------------
+
+
+def _nl_to_cache(result: NlRuleResponse) -> dict:
+    if isinstance(result, NlRuleSuccess):
+        return {"type": "rule", "rule": result.rule.model_dump()}
+    return {"type": "clarification", "question": result.question}  # type: ignore[union-attr]
+
+
+def _nl_from_cache(cached: dict) -> NlRuleResponse:
+    if cached.get("type") == "rule":
+        return NlRuleSuccess(rule=GeRule.model_validate(cached["rule"]))
+    return NlRuleClarification(question=cached["question"])
