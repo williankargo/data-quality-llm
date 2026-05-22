@@ -4,16 +4,19 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy.orm import Session
 
 from app.api.errors import raise_error
+from app.services.ai_generator import AiGenerator, LlmOutputError
 from app.services.db import get_db, get_session
 from app.services.ge_engine import GeEngine
-from app.services.rules_store import list_rules
+from app.services.rules_store import get_rule, list_rules
 from app.services.runs_store import (
     create_run,
     finalize_run,
+    get_result_with_table,
     get_run,
     list_runs,
     write_result,
 )
+from app.schemas.explain import ExplainResponse
 from app.schemas.runs import CreateRunRequest, RunDetail, RunSummary
 
 router = APIRouter(tags=["results"])
@@ -78,3 +81,34 @@ def fetch_runs(
     session: Session = Depends(get_db),
 ) -> list[RunSummary]:
     return list_runs(session, table_name=table_name, limit=limit)
+
+
+@router.post("/results/{result_id}/explain", response_model=ExplainResponse)
+def explain_result(result_id: int, session: Session = Depends(get_db)) -> ExplainResponse:
+    """Return a plain-English LLM explanation for a failed run result (D#30)."""
+    pair = get_result_with_table(session, result_id)
+    if pair is None:
+        raise_error("RESULT_NOT_FOUND")
+        return None  # unreachable; satisfies type checker
+
+    result, table_name = pair
+    if result.status != "fail":
+        raise_error("RESULT_NOT_FAILED")
+        return None  # unreachable
+
+    rule = get_rule(session, result.rule_id) if result.rule_id is not None else None
+
+    try:
+        generator = AiGenerator()
+        return generator.explain_failure(
+            session=session,
+            rule_id=result.rule_id,
+            expectation_type=result.expectation_type,
+            kwargs=rule.kwargs if rule else {},
+            unexpected_sample=result.unexpected_sample,
+            observed_value=result.observed_value,
+            table_name=table_name,
+        )
+    except LlmOutputError as exc:
+        raise_error("LLM_OUTPUT_INVALID", str(exc))
+        return None  # unreachable

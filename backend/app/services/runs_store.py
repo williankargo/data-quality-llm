@@ -150,6 +150,24 @@ def list_runs(
     return [_row_to_summary(r) for r in rows]
 
 
+def get_result_with_table(
+    session: Session, result_id: int
+) -> tuple[RunResult, str] | None:
+    """Return (RunResult, table_name) for a single result row, or None if not found."""
+    sql = text(
+        """
+        SELECT rr.*, r.table_name
+        FROM dq.run_results rr
+        JOIN dq.runs r ON r.id = rr.run_id
+        WHERE rr.id = :result_id
+        """
+    )
+    row = session.execute(sql, {"result_id": result_id}).fetchone()
+    if row is None:
+        return None
+    return _row_to_result(row), row.table_name
+
+
 def get_latest_run_for_table(session: Session, table_name: str) -> RunDetail | None:
     """Return the most recent finalized run for a table, with full results."""
     sql = text(

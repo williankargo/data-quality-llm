@@ -4,6 +4,7 @@ import { apiFetch } from "./api";
 import type {
   ChatMessage,
   CreateRuleRequest,
+  ExplainResponse,
   NlRuleResponse,
   RuleRecord,
   RunDetail,
@@ -74,6 +75,16 @@ export const useUpdateRule = (tableName: string) => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rules", tableName] });
     },
+  });
+};
+
+export const useExplainFailure = () => {
+  return useMutation({
+    mutationFn: (resultId: number) =>
+      apiFetch<ExplainResponse>(`/results/${resultId}/explain`, {
+        method: "POST",
+        body: {},
+      }),
   });
 };
 

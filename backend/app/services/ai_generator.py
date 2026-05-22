@@ -13,7 +13,7 @@ import anthropic
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.schemas.explain import ChatMessage
+from app.schemas.explain import ChatMessage, ExplainResponse
 from app.schemas.rules import GeRule, NlRuleClarification, NlRuleResponse, NlRuleSuccess
 from app.schemas.tables import ColumnInfo
 from app.services.llm_cache import get_cached, make_cache_key, set_cached
@@ -82,6 +82,32 @@ REQUEST_CLARIFICATION_TOOL: dict = {
         "required": ["question"],
         "properties": {
             "question": {"type": "string"},
+        },
+    },
+}
+
+EXPLAIN_FAILURE_TOOL: dict = {
+    "name": "explain_failure",
+    "description": "Return a plain-English explanation of why a data quality rule failed.",
+    "input_schema": {
+        "type": "object",
+        "required": ["explanation", "possible_causes", "suggested_action"],
+        "properties": {
+            "explanation": {
+                "type": "string",
+                "description": "1-2 sentences explaining the failure in plain English.",
+            },
+            "possible_causes": {
+                "type": "array",
+                "description": "2-4 likely root causes.",
+                "minItems": 2,
+                "maxItems": 4,
+                "items": {"type": "string"},
+            },
+            "suggested_action": {
+                "type": "string",
+                "description": "One sentence recommending the next action.",
+            },
         },
     },
 }
@@ -191,6 +217,57 @@ class AiGenerator:
         )
         result = self._dispatch_nl_response(response)
         set_cached(session, cache_key, "rule_from_nl", _nl_to_cache(result))
+        return result
+
+    def explain_failure(
+        self,
+        session: Session,
+        rule_id: int | None,
+        expectation_type: str,
+        kwargs: dict,
+        unexpected_sample: list | None,
+        observed_value: object,
+        table_name: str,
+    ) -> ExplainResponse:
+        cache_key = make_cache_key(
+            "explain_failure",
+            PROMPT_VERSION_EXPLAIN,
+            rule_id=rule_id,
+            unexpected_sample=unexpected_sample or [],
+        )
+        if (cached := get_cached(session, cache_key)) is not None:
+            return ExplainResponse.model_validate(cached)
+
+        prompt = _load_template(
+            "explain_failure.md",
+            {
+                "table_name": table_name,
+                "expectation_type": expectation_type,
+                "kwargs_json": json.dumps(kwargs, indent=2, default=str),
+                "unexpected_sample_json": json.dumps(
+                    unexpected_sample or [], indent=2, default=str
+                ),
+                "observed_value_json": json.dumps(observed_value, default=str),
+            },
+        )
+        response = self.client.messages.create(
+            model=settings.LLM_MODEL,
+            max_tokens=512,
+            tools=[EXPLAIN_FAILURE_TOOL],
+            tool_choice={"type": "tool", "name": "explain_failure"},
+            messages=[{"role": "user", "content": prompt}],
+        )
+        tool_block = next(
+            (b for b in response.content if b.type == "tool_use"), None
+        )
+        if tool_block is None:
+            raise LlmOutputError("No tool_use block in explain_failure response")
+        try:
+            result = ExplainResponse.model_validate(tool_block.input)
+        except Exception as exc:
+            raise LlmOutputError(str(exc)) from exc
+
+        set_cached(session, cache_key, "explain_failure", result.model_dump())
         return result
 
     # ------------------------------------------------------------------

@@ -397,3 +397,23 @@ These two changes were noticed by the developer after the implementer–reviewer
 - **Fix**: Removed all D#27 references from the plan document so the written spec matches what was actually built. The descoped item is now listed only in the Future Enhancements section of `docs/architecture.md`.
 - **Why it matters**: A plan document that describes features that were never built is misleading to any reader using it as the authoritative record of what the system does.
 
+---
+
+### Phase 6 — Bonus: LLM Explain Failure (D#30) — Test Hardening Fix
+
+#### Implementer-initiated fix (reviewer finding from Phase 6 audit)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **implementer agent**
+- **Trigger**: The Phase 6 reviewer audit (Approved with notes) flagged that `test_returns_explain_response_shape` in `tests/test_explain.py` used a name-mangled mock — `patch.object(..., "_AiGenerator__init__", ..., create=True)` and dynamic `__import__` calls to obtain `AiGenerator` and `ExplainResponse`. The reviewer noted this pattern could silently break on Python version changes or class refactors.
+- **Fix applied**:
+  - Added module-level imports for `AiGenerator`, `PROMPT_VERSION_EXPLAIN`, `ExplainResponse`, `get_cached`, `make_cache_key`, `set_cached` at the top of the test file.
+  - Replaced the name-mangled `patch.object(..., "_AiGenerator__init__", ...)` with `patch.object(AiGenerator, "__init__", lambda self: None)` — the standard public-attribute form.
+  - Collapsed the nested `with patch(...)` for `explain_failure` into the same `with (...)` block using `patch.object(AiGenerator, "explain_failure", return_value=ExplainResponse(...))` — cleaner and no functional difference.
+  - Removed the three redundant local re-imports inside `test_explain_uses_llm_cache` (now covered by module-level imports).
+- **Outcome**: 4/4 tests pass; no production code touched; mock semantics identical to pre-fix.
+
+#### Review (reviewer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **reviewer agent**
+- **Verdict**: **Approved with notes** — fix is correctly scoped to test internals; `patch.object(AiGenerator, "__init__", ...)` correctly stubs the constructor's Anthropic client instantiation; `patch.object(AiGenerator, "explain_failure", ...)` correctly intercepts the bound method on the instance created in the endpoint; `create=True` kwarg correctly dropped (attribute exists); all 4 tests pass on re-verification. Note recorded: the redundant local re-imports inside `test_explain_uses_llm_cache` were also cleaned up in the same pass.
+
