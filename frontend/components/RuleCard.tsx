@@ -1,7 +1,9 @@
 "use client";
+import { useState } from "react";
 import { FrontendDraft, RuleRecord, CreateRuleRequest } from "@/types/api";
 import { useSaveRule, useDeleteRule } from "@/lib/mutations";
 import { ApiError } from "@/lib/api";
+import { RuleEditModal } from "./RuleEditModal";
 
 interface DraftProps {
   mode: "draft";
@@ -84,22 +86,40 @@ export function RuleCard(props: RuleCardProps) {
 
   // Saved mode
   const { rule } = props;
+  const [editing, setEditing] = useState(false);
   return (
-    <div className="border rounded-lg p-4 bg-white shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-mono text-gray-400 truncate">{rule.expectation_type}</p>
-          <p className="text-sm text-gray-900 mt-1">{rule.description}</p>
-          <p className="text-xs text-gray-400 mt-1">{SOURCE_LABELS[rule.source] ?? rule.source}</p>
+    <>
+      <div className="border rounded-lg p-4 bg-white shadow-sm">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-mono text-gray-400 truncate">{rule.expectation_type}</p>
+            <p className="text-sm text-gray-900 mt-1">{rule.description}</p>
+            <p className="text-xs text-gray-400 mt-1">{SOURCE_LABELS[rule.source] ?? rule.source}</p>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <button
+              onClick={() => setEditing(true)}
+              className="px-3 py-1.5 text-xs font-medium text-blue-600 border border-blue-200 rounded hover:bg-blue-50 transition-colors"
+            >
+              Edit
+            </button>
+            <button
+              onClick={() => deleteRule.mutate(rule.id)}
+              disabled={deleteRule.isPending}
+              className="px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded hover:bg-red-50 disabled:opacity-50 transition-colors"
+            >
+              Delete
+            </button>
+          </div>
         </div>
-        <button
-          onClick={() => deleteRule.mutate(rule.id)}
-          disabled={deleteRule.isPending}
-          className="shrink-0 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded hover:bg-red-50 disabled:opacity-50 transition-colors"
-        >
-          Delete
-        </button>
       </div>
-    </div>
+      {editing && (
+        <RuleEditModal
+          rule={rule}
+          tableName={tableName}
+          onClose={() => setEditing(false)}
+        />
+      )}
+    </>
   );
 }

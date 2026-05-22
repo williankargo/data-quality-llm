@@ -1,6 +1,6 @@
 """Results API: run GE checks against a table and retrieve run history."""
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy.orm import Session
 
 from app.api.errors import raise_error
@@ -66,7 +66,8 @@ def trigger_run(
 def fetch_run(run_id: int, session: Session = Depends(get_db)) -> RunDetail:
     run = get_run(session, run_id)
     if run is None:
-        raise HTTPException(status_code=404, detail="RUN_NOT_FOUND")
+        raise_error("RUN_NOT_FOUND")
+        return None  # unreachable; satisfies type checker
     return run
 
 

@@ -31,7 +31,8 @@
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('status:', d['status']\\); print\\('result count:', len\\(d['results']\\)\\); print\\('rule_ids:', [r['rule_id'] for r in d['results']]\\)\")",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('error_message:', d.get\\('error_message', ''\\)[:200]\\)\")",
       "Bash(git -C /Users/pinkuan/Projects/data-quality-llm/ diff HEAD -- frontend/types/api.ts)",
-      "Bash(git -C /Users/pinkuan/Projects/data-quality-llm/ log --oneline -- frontend/types/api.ts)"
+      "Bash(git -C /Users/pinkuan/Projects/data-quality-llm/ log --oneline -- frontend/types/api.ts)",
+      "Bash(npx tsc *)"
     ]
   }
 }

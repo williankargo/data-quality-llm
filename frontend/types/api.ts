@@ -76,6 +76,12 @@ export interface CreateRuleRequest extends GeRule {
   source: RuleSource;
 }
 
+export interface UpdateRuleRequest {
+  expectation_type: string;
+  kwargs: Record<string, unknown>;
+  description: string;
+}
+
 // ─── Run / result types ──────────────────────────────────────────────────────
 
 export type ResultStatus = "pass" | "fail" | "error";

@@ -6,9 +6,10 @@ Endpoints:
   GET /tables/{name}/sample — first N rows for AI context
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.api.errors import raise_error
 from app.services.db import get_db, get_table_columns, list_public_tables, sample_table
 from app.schemas.tables import SampleResponse, TableDetail, TableInfo
 
@@ -32,7 +33,7 @@ def get_table(name: str, db: Session = Depends(get_db)) -> TableDetail:
     tables = list_public_tables(db)
     matched = next((t for t in tables if t.name == name), None)
     if matched is None:
-        raise HTTPException(status_code=404, detail="TABLE_NOT_FOUND")
+        raise_error("TABLE_NOT_FOUND")
 
     columns = get_table_columns(db, name)
     return TableDetail(
@@ -56,7 +57,7 @@ def get_table_sample(
     # "table exists but is empty".
     tables = list_public_tables(db)
     if not any(t.name == name for t in tables):
-        raise HTTPException(status_code=404, detail="TABLE_NOT_FOUND")
+        raise_error("TABLE_NOT_FOUND")
 
     rows = sample_table(db, name, limit)
     return SampleResponse(rows=rows, limit=limit)

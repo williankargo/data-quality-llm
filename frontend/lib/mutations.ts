@@ -9,6 +9,7 @@ import type {
   RunDetail,
   RunSummary,
   SuggestResponse,
+  UpdateRuleRequest,
 } from "../types/api";
 
 export const useSuggestRules = (tableName: string) => {
@@ -62,6 +63,17 @@ export const useNlRule = (tableName: string) => {
         method: "POST",
         body: { table_name: tableName, messages },
       }),
+  });
+};
+
+export const useUpdateRule = (tableName: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: UpdateRuleRequest }) =>
+      apiFetch<RuleRecord>(`/rules/${id}`, { method: "PUT", body }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["rules", tableName] });
+    },
   });
 };
 

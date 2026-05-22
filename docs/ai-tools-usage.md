@@ -354,3 +354,46 @@ This loop creates a traceable chain: every line of code is linked to a Specifica
 - **Tool**: Claude Code (claude-sonnet-4-6) via **reviewer agent**
 - **Verdict**: **Approved** — `uv run pytest tests/test_runs_async.py` passes with 13 tests; all three previously-missing assertions are now present; documentation interval corrected; no new scope creep introduced during the fix.
 
+---
+
+### Phase 5 — PUT Edit Modal, Diff View, and Error Polish
+
+#### Implementation (implementer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **implementer agent**
+- **Task**: D#26 `RuleEditModal` + `DiffLines` components, `RuleCard` [Edit] button, `useUpdateRule` mutation; D#31 backend HTTPException → `raise_error()` migration across `tables.py`, `rules.py`, `results.py`
+- **Outcome**:
+  - `RuleEditModal` renders a two-column layout: left side shows the original rule as read-only JSON; right side has an `expectation_type` select, a `kwargs` textarea with live `JSON.parse` validation, and a `description` textarea
+  - `DiffLines` is a self-contained ~66-line component that renders field-level before/after comparison at the bottom of the modal — no external diff library introduced
+  - Save is disabled whenever `kwargs` contains invalid JSON; an inline red error message explains the format requirement
+  - All three backend API files now use `raise_error()` from `app/api/errors.py` rather than constructing `HTTPException` directly, consolidating error code definitions in one place
+- **Component architecture note**: `RuleEditModal` is rendered inside a `<>…</>` fragment alongside the existing `RuleCard` div rather than portal-mounted. This keeps the component tree local to the card but still works correctly because the overlay uses `fixed inset-0` positioning — the stacking context does not depend on DOM position at MVP scale.
+
+#### Review (reviewer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **reviewer agent**
+- **Verdict**: **Approved with notes** — all D#26 and D#31 spec requirements met; `DiffLines` is 66 lines (spec guideline was ≤60, spirit satisfied); diff uses uniform red/green treatment for all fields rather than the spec's literal `▶` glyph for `expectation_type` (functionally equivalent); `INTERNAL_ERROR` is a frontend-synthesised code with no corresponding backend `CODE_MAP` entry (intentional — `lib/api.ts` generates it on network failure — but worth noting for future SOP documentation)
+
+#### Commit (`/commit-push` skill)
+
+- **Tool**: Claude Code `/commit-push` skill
+- **Commit**: `feat(day3-phase5): implement rule edit modal with diff view and error polish (D#26, D#31)`
+
+---
+
+#### Developer-Initiated Fixes
+
+These two changes were noticed by the developer after the implementer–reviewer cycle completed and were folded into the same commit. They are recorded here because they reflect the developer's own product instincts rather than spec-driven work.
+
+**Input text color fix**
+
+- **Observation**: After the Edit modal was first rendered, the text inside the `select`, kwargs `textarea`, and description `textarea` appeared light-coloured. The browser's default text colour on form elements is system-defined and can render as near-invisible on certain OS appearance settings.
+- **Fix**: Added `text-gray-900` to all three form element class lists in `RuleEditModal.tsx`. No architectural change; one-line addition per element.
+- **Why it matters**: A modal where you cannot clearly read what you are editing defeats the purpose of the edit flow. This is the kind of gap that unit and type-checking tools cannot catch — it requires actually looking at the rendered UI.
+
+**`docs/day3-plan.md` cleanup**
+
+- **Observation**: `day3-plan.md` still contained the full D#27 mobile drawer decision (decision text, spec section, component pseudocode, risk table entry, rollout phase task, and demo checklist item) even though mobile layout had been descoped before Day 3 implementation began.
+- **Fix**: Removed all D#27 references from the plan document so the written spec matches what was actually built. The descoped item is now listed only in the Future Enhancements section of `docs/architecture.md`.
+- **Why it matters**: A plan document that describes features that were never built is misleading to any reader using it as the authoritative record of what the system does.
+

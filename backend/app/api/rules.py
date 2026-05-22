@@ -12,7 +12,7 @@ Endpoints:
 from typing import Union
 
 import anthropic
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.schemas.rules import (
@@ -25,6 +25,7 @@ from app.schemas.rules import (
     SuggestResponse,
     UpdateRuleRequest,
 )
+from app.api.errors import raise_error
 from app.services.ai_generator import AiGenerator, LlmOutputError
 from app.services.db import get_db, get_table_columns, list_public_tables, sample_table
 from app.services.rules_store import (
@@ -57,9 +58,9 @@ def suggest_rules(
     try:
         raw_rules = ai.suggest_rules(db, body.table_name, columns, rows)
     except anthropic.APITimeoutError:
-        raise HTTPException(status_code=504, detail="LLM_TIMEOUT")
+        raise_error("LLM_TIMEOUT")
     except LlmOutputError:
-        raise HTTPException(status_code=502, detail="LLM_OUTPUT_INVALID")
+        raise_error("LLM_OUTPUT_INVALID")
     drafts = mark_drafts_already_saved(db, body.table_name, raw_rules)
     return SuggestResponse(drafts=drafts)
 
@@ -73,9 +74,9 @@ def rule_from_nl(
     try:
         result = ai.rule_from_nl(db, body.table_name, columns, body.messages)
     except anthropic.APITimeoutError:
-        raise HTTPException(status_code=504, detail="LLM_TIMEOUT")
+        raise_error("LLM_TIMEOUT")
     except LlmOutputError:
-        raise HTTPException(status_code=502, detail="LLM_OUTPUT_INVALID")
+        raise_error("LLM_OUTPUT_INVALID")
     return result
 
 
@@ -103,7 +104,7 @@ def update_rule_endpoint(
     rule_id: int, body: UpdateRuleRequest, db: Session = Depends(get_db)
 ) -> RuleRecord:
     if get_rule(db, rule_id) is None:
-        raise HTTPException(status_code=404, detail="RULE_NOT_FOUND")
+        raise_error("RULE_NOT_FOUND")
     return update_rule(db, rule_id, body)
 
 
@@ -112,7 +113,7 @@ def delete_rule_endpoint(
     rule_id: int, db: Session = Depends(get_db)
 ) -> dict:
     if not delete_rule(db, rule_id):
-        raise HTTPException(status_code=404, detail="RULE_NOT_FOUND")
+        raise_error("RULE_NOT_FOUND")
     return {"ok": True}
 
 
@@ -124,4 +125,4 @@ def delete_rule_endpoint(
 def _require_table(table_name: str, db: Session) -> None:
     tables = list_public_tables(db)
     if not any(t.name == table_name for t in tables):
-        raise HTTPException(status_code=404, detail="TABLE_NOT_FOUND")
+        raise_error("TABLE_NOT_FOUND")
