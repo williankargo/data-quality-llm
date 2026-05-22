@@ -13,6 +13,7 @@ import anthropic
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.schemas.explain import ChatMessage
 from app.schemas.rules import GeRule, NlRuleClarification, NlRuleResponse, NlRuleSuccess
 from app.schemas.tables import ColumnInfo
 from app.services.llm_cache import get_cached, make_cache_key, set_cached
@@ -22,7 +23,7 @@ _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 # Bump these whenever the corresponding prompt template file changes.
 # A version change invalidates all existing cache entries for that prompt path.
 PROMPT_VERSION_SCHEMA = "v1"
-PROMPT_VERSION_NL = "v1"      # bumped to "v2" in Phase 4 (multi-turn)
+PROMPT_VERSION_NL = "v2"       # bumped: multi-turn messages support (D#25)
 PROMPT_VERSION_EXPLAIN = "v1"  # used in Phase 6
 
 
@@ -158,34 +159,35 @@ class AiGenerator:
         session: Session,
         table_name: str,
         columns: list[ColumnInfo],
-        description: str,
+        messages: list[ChatMessage],
     ) -> NlRuleResponse:
         cache_key = make_cache_key(
             "rule_from_nl",
             PROMPT_VERSION_NL,
             table_name=table_name,
             columns=[c.model_dump() for c in columns],
-            description=description,
+            messages=[m.model_dump() for m in messages],
         )
         if (cached := get_cached(session, cache_key)) is not None:
             return _nl_from_cache(cached)
 
-        prompt = _load_template(
+        system_prompt = _load_template(
             "rule_from_nl.md",
             {
                 "table_name": table_name,
                 "columns_json": json.dumps(
                     [c.model_dump() for c in columns], indent=2
                 ),
-                "user_description": description,
             },
         )
+        anthropic_messages = _build_anthropic_messages(messages)
         response = self.client.messages.create(
             model=settings.LLM_MODEL,
             max_tokens=1024,
+            system=system_prompt,
             tools=[PROPOSE_RULE_TOOL, REQUEST_CLARIFICATION_TOOL],
             tool_choice={"type": "any"},
-            messages=[{"role": "user", "content": prompt}],
+            messages=anthropic_messages,
         )
         result = self._dispatch_nl_response(response)
         set_cached(session, cache_key, "rule_from_nl", _nl_to_cache(result))
@@ -220,6 +222,64 @@ class AiGenerator:
             return NlRuleClarification(question=tool_block.input["question"])
         except Exception as exc:
             raise LlmOutputError(str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Multi-turn message format helpers
+# ---------------------------------------------------------------------------
+
+
+def _build_anthropic_messages(messages: list[ChatMessage]) -> list[dict]:
+    """Convert ChatMessage list to Anthropic Messages API format (D#25).
+
+    Assistant messages store a JSON-serialised NlRuleResponse.  We reconstruct
+    proper tool_use / tool_result block pairs so the API accepts the history.
+    Each pair:
+      assistant turn  → content: [tool_use block]
+      next user turn  → content: [tool_result block + text block]
+    """
+    result: list[dict] = []
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        if msg.role == "user":
+            result.append({"role": "user", "content": msg.content})
+            i += 1
+        else:
+            # Parse stored NlRuleResponse JSON to reconstruct tool_use block.
+            try:
+                parsed = json.loads(msg.content)
+                tool_id = f"tu_{i:03d}"
+                if parsed.get("type") == "rule":
+                    tool_name = "propose_rule"
+                    tool_input = parsed["rule"]
+                else:
+                    tool_name = "request_clarification"
+                    tool_input = {"question": parsed.get("question", "")}
+            except (json.JSONDecodeError, KeyError):
+                # Fallback: pass as plain text so the conversation is not lost.
+                result.append({"role": "assistant", "content": msg.content})
+                i += 1
+                continue
+
+            result.append({
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": tool_id, "name": tool_name, "input": tool_input}
+                ],
+            })
+            i += 1
+            # The next user message must close the tool_use with a tool_result block.
+            if i < len(messages) and messages[i].role == "user":
+                result.append({
+                    "role": "user",
+                    "content": [
+                        {"type": "tool_result", "tool_use_id": tool_id, "content": "OK"},
+                        {"type": "text", "text": messages[i].content},
+                    ],
+                })
+                i += 1
+    return result
 
 
 # ---------------------------------------------------------------------------

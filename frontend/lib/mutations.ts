@@ -2,6 +2,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "./api";
 import type {
+  ChatMessage,
   CreateRuleRequest,
   NlRuleResponse,
   RuleRecord,
@@ -56,10 +57,10 @@ export const useDeleteRule = (tableName: string) => {
 
 export const useNlRule = (tableName: string) => {
   return useMutation({
-    mutationFn: (description: string) =>
+    mutationFn: (messages: ChatMessage[]) =>
       apiFetch<NlRuleResponse>("/rules/from-nl", {
         method: "POST",
-        body: { table_name: tableName, description },
+        body: { table_name: tableName, messages },
       }),
   });
 };

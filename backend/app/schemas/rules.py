@@ -5,6 +5,8 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.explain import ChatMessage
+
 
 class GeRule(BaseModel):
     """Core GE rule structure shared across store, API, and AI generator output."""
@@ -42,7 +44,7 @@ class SuggestResponse(BaseModel):
 
 class NlRuleRequest(BaseModel):
     table_name: str
-    description: str = Field(min_length=3, max_length=500)
+    messages: list[ChatMessage] = Field(min_length=1, max_length=10)  # 5 user + 5 assistant turns
 
 
 class NlRuleSuccess(BaseModel):

@@ -209,7 +209,10 @@ def test_from_nl_returns_rule():
         mock_ai.rule_from_nl.return_value = expected
         resp = client.post(
             "/rules/from-nl",
-            json={"table_name": "policyholders", "description": "national_id must not be null"},
+            json={
+                "table_name": "policyholders",
+                "messages": [{"role": "user", "content": "national_id must not be null"}],
+            },
         )
 
     assert resp.status_code == 200
@@ -231,7 +234,10 @@ def test_from_nl_returns_clarification():
         mock_ai.rule_from_nl.return_value = expected
         resp = client.post(
             "/rules/from-nl",
-            json={"table_name": "policyholders", "description": "data must be good"},
+            json={
+                "table_name": "policyholders",
+                "messages": [{"role": "user", "content": "data must be good"}],
+            },
         )
 
     assert resp.status_code == 200

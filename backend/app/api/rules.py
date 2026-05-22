@@ -71,7 +71,7 @@ def rule_from_nl(
     _require_table(body.table_name, db)
     columns = get_table_columns(db, body.table_name)
     try:
-        result = ai.rule_from_nl(db, body.table_name, columns, body.description)
+        result = ai.rule_from_nl(db, body.table_name, columns, body.messages)
     except anthropic.APITimeoutError:
         raise HTTPException(status_code=504, detail="LLM_TIMEOUT")
     except LlmOutputError:
