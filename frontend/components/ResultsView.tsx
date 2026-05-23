@@ -208,7 +208,16 @@ export function ResultsView({ tableName }: ResultsViewProps) {
         </div>
       )}
 
-      {run && run.results.length === 0 && !isRunning && (
+      {run && run.status === "failed" && !isRunning && (
+        <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+          Run failed:{" "}
+          {run.error_message
+            ? run.error_message.slice(0, 200)
+            : "Unknown error. Check backend logs."}
+        </div>
+      )}
+
+      {run && run.status !== "failed" && run.results.length === 0 && !isRunning && (
         <p className="text-sm text-gray-400">
           No rules to check. Add rules in the Rules tab first.
         </p>
