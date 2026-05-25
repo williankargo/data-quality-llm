@@ -36,7 +36,17 @@
       "Bash(echo \"---exit:$?\")",
       "Bash(lsof -ti:8000)",
       "Bash(lsof -ti:3000)",
-      "Bash(python3 -c \"import json,sys; runs=json.load\\(sys.stdin\\); stuck=[r for r in runs if r['status']=='running']; print\\(json.dumps\\(stuck, indent=2\\)\\)\")"
+      "Bash(python3 -c \"import json,sys; runs=json.load\\(sys.stdin\\); stuck=[r for r in runs if r['status']=='running']; print\\(json.dumps\\(stuck, indent=2\\)\\)\")",
+      "Bash(npx playwright *)",
+      "Read(//private/tmp/**)",
+      "Bash(npm init *)",
+      "Bash(python3 -c \"import json,sys; runs=json.load\\(sys.stdin\\); [print\\(json.dumps\\(r, indent=2\\)\\) for r in runs]\")",
+      "Bash(git *)",
+      "Bash(gh repo *)",
+      "mcp__codebase-memory-mcp__index_repository",
+      "mcp__codebase-memory-mcp__get_architecture",
+      "Bash(grep -n \"RESULT_NOT_FAILED\\\\|RESULT_NOT_FOUND\\\\|RUN_NOT_FOUND\\\\|INVALID_RULE_IDS\" app/api/errors.py)",
+      "Bash(ls app/api/errors.py)"
     ]
   }
 }

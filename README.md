@@ -21,18 +21,26 @@ User opens localhost:3000
     │   ├── "Suggest rules" button
     │   │   └── LLM reads schema + sample → proposes 5–10 GE rules
     │   │       (e.g. "national_id must match A999999999 format")
-    │   └── Plain-English input box
-    │       └── LLM translates one sentence → one GE rule
-    │           or asks a clarifying question if too vague
+    │   ├── "Add rule by description" → multi-turn chat
+    │   │   └── LLM translates plain English → one GE rule
+    │   │       refine it over follow-up turns (up to 5 rounds)
+    │   │       or it asks a clarifying question if too vague
+    │   └── Saved rule cards
+    │       └── "Edit" → modal with side-by-side diff of your changes
     │
     └── Results tab
+        ├── (optional) Rule filter → run only selected rules
         └── "Run checks" button
-            └── Runs all saved rules against the live table
+            └── Runs saved rules asynchronously; UI polls for progress
                 └── Each rule: PASS (green) / FAIL (red) / ERROR (yellow)
-                    └── Expand row → violating sample values + count, or error message
+                    └── Expand a FAIL row →
+                        ├── table of up to 10 full violating rows
+                        │   (violating column highlighted; horizontal scroll)
+                        ├── "Download all violations (CSV)" button
+                        └── "Why did this fail?" → LLM plain-English explanation
 ```
 
-Results use a three-color system: **green** = rule passes, **red** = data violates the rule (with violating sample values), **yellow** = rule itself failed to execute (e.g., column does not exist — fix the rule, not the data).
+Results use a three-color system: **green** = rule passes, **red** = data violates the rule (expand to see full violating rows), **yellow** = rule itself failed to execute (e.g., column does not exist — fix the rule, not the data).
 
 Any error (DB down, LLM timeout) shows a human-readable message with possible causes and a retry button — no raw stack traces shown to the user.
 
@@ -64,9 +72,10 @@ cp backend/.env.example backend/.env
 ```
 
 ```bash
-# Frontend
-cp frontend/.env.local.example frontend/.env.local
-# Edit frontend/.env.local if your backend runs on a different host/port
+# Frontend (optional)
+# The frontend defaults to http://localhost:8000 for the backend.
+# Only create frontend/.env.local if your backend runs elsewhere:
+#   echo 'NEXT_PUBLIC_API_URL=http://your-host:port' > frontend/.env.local
 ```
 
 ### 2. Database Setup (Supabase)
@@ -76,6 +85,9 @@ In the Supabase SQL Editor, run these files in order:
 2. `backend/db/seed.sql` — inserts ~120 rows of clean insurance data
 3. `backend/db/001_dq_schema.sql` — creates the dq schema for rules and run results
 4. `backend/db/002_run_results_status.sql` — adds the three-state `status` column to run_results
+5. `backend/db/003_llm_cache.sql` — creates the `dq.llm_cache` table (LLM response cache)
+6. `backend/db/004_run_results_rows.sql` — adds `unexpected_rows` (JSONB) + `truncated` to run_results
+7. `backend/db/005_dirty_data.sql` — inserts intentionally dirty rows so rules produce FAIL results in the demo
 
 ### 3. Start the backend
 
@@ -97,16 +109,11 @@ npm run dev
 
 Open `http://localhost:3000` — you should see the Table Explorer with 3 tables in the sidebar.
 
-### 5. Insert a dirty row (required for demo fail results)
+### 5. Dirty data for demo fail results
 
-Run this in the Supabase SQL Editor before proceeding — it creates one row that will trigger rule failures:
+Step 7 of the Database Setup above (`005_dirty_data.sql`) already inserts dirty rows across all three tables — bad `national_id` formats, invalid `gender`/`status`/`product_type` values, negative premiums, future dates, and date-ordering violations. These guarantee **red** (fail) results with multiple violating rows so you can exercise the violating-row table and CSV download.
 
-```sql
-INSERT INTO public.policyholders (national_id, full_name, birth_date, gender)
-VALUES (NULL, 'Dirty Row', '2030-01-01', 'X');
-```
-
-This row has a null `national_id` and an invalid `gender` value, which will produce **red** (fail) results in the Results Dashboard.
+If you skipped that migration, run it now in the Supabase SQL Editor before proceeding.
 
 ### 6. Full demo flow
 
@@ -122,20 +129,28 @@ Switch to the **Rules** tab. Click **Suggest rules** — the backend sends the t
 
 Click **Save** on 4–5 rules you want to keep. Each saved rule appears in the "Saved rules" section below.
 
-**Step 4 — Add a custom rule via natural language**
+**Step 4 — Add a custom rule via natural-language chat**
 
-Click **Add rule by description**. Type something specific like `"premium must not be negative"` and submit. The AI translates it into a GE expectation and returns a draft card to save. If you type something vague like `"data must be good"`, the AI asks a clarifying question instead.
+Click **Add rule by description**. Type something specific like `"premium must not be negative"` and submit. The AI translates it into a GE expectation and returns a draft card. This is a **multi-turn chat**: you can refine over follow-up turns (e.g., `"also reject zero"`) for up to 5 rounds. If you type something vague like `"data must be good"`, the AI asks a clarifying question instead. The conversation lives only in the browser — refresh or **Start over** clears it.
 
-**Step 5 — Run the checks**
+**Step 5 — Edit a saved rule (with diff view)**
 
-Switch to the **Results** tab. Click **Run checks**. Within 2 seconds, each rule shows one of:
+On any saved rule card, click **Edit**. The modal shows the original rule on the left and an editable form on the right (expectation type, kwargs JSON, description). A diff at the bottom highlights exactly what you changed. Invalid `kwargs` JSON blocks Save with an inline error. Save triggers `PUT /rules/{id}`.
+
+**Step 6 — Run the checks**
+
+Switch to the **Results** tab. Click **Run checks**. The run executes **asynchronously**: the request returns immediately with `status: running`, the UI polls every second and shows an `N/total rules completed` counter as each rule finishes. Optionally expand the **rule filter** first to run only a subset. Each rule then shows one of:
 - **Green** — rule passes; data is clean
-- **Red** — data violates the rule; expand to see violating row samples and count
-- **Yellow** — rule could not execute (e.g., column does not exist); check rule configuration
+- **Red** — data violates the rule; expand to see the full violating rows
+- **Yellow** — rule could not execute (e.g., column does not exist); fix the rule, not the data
 
-**Step 6 — Re-run after changes**
+**Step 7 — Inspect and explain failures**
 
-Go back to Rules, delete a rule, return to Results, and click Run again — the new run reflects the updated rule set. Previous run results remain visible in the database even after rules are deleted.
+Expand a **red** row. You get a table of up to 10 complete violating rows, with the violating column highlighted (horizontal scroll for wide tables). Click **Download all violations (CSV)** to export every captured violating row (capped at 1000). Click **Why did this fail?** to have Claude explain the failure in plain English with possible causes and a suggested action — responses are cached so re-opening the same row is instant.
+
+**Step 8 — Re-run after changes**
+
+Go back to Rules, delete or edit a rule, return to Results, and click Run again — the new run reflects the updated rule set. Previous runs remain stored as immutable snapshots (including their violating rows) even after rules change.
 
 ## Development
 
@@ -143,8 +158,9 @@ See `backend/README.md` and `frontend/` for service-specific instructions.
 
 ## Documentation
 
-- `docs/day1-plan.md` — Day 1 architecture decisions and implementation specification
-- `docs/day2-plan.md` — Day 2 architecture decisions and implementation specification
-- `docs/ai-tools-usage.md` — AI tool usage log (Day 1 + Day 2)
-- `docs/ai-integration.md` — AI integration details (Day 3)
-- `docs/architecture.md` — Full architecture overview (Day 3)
+- [`docs/architecture.md`](docs/architecture.md) — full architecture overview, request flow, and Future Enhancements
+- [`docs/ai-integration.md`](docs/ai-integration.md) — AI design rationale: prompts, Tool Use schemas, multi-turn chat, response cache
+- [`docs/ai-tools-usage.md`](docs/ai-tools-usage.md) — AI tool usage log (Day 1 → Day 3)
+- [`docs/day1-plan.md`](docs/day1-plan.md) — Day 1 architecture decisions and implementation specification
+- [`docs/day2-plan.md`](docs/day2-plan.md) — Day 2 architecture decisions and implementation specification
+- [`docs/day3-plan.md`](docs/day3-plan.md) — Day 3 architecture decisions (D#23–D#38) and specification

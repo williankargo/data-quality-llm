@@ -30,6 +30,17 @@ architect agent  →  implementer agent  →  reviewer agent
 
 This loop creates a traceable chain: every line of code is linked to a Specification entry, every Specification entry is linked to a Decision Log item, and every Decision Log item records the tradeoff that was accepted. The reviewer → implementer correction cycle ensures that "implementer says it passed" and "it actually passed" are not conflated.
 
+### Tooling — codebase-memory MCP (token efficiency)
+
+Code discovery during development went through a **codebase-memory MCP server** instead of reading whole files into the agent's context. The server indexes the repository into a queryable knowledge graph, so the agent retrieves only the slice it needs for a given task:
+
+- `search_graph` / `query_graph` — locate a function, class, route, or symbol by name or pattern.
+- `get_code_snippet` — pull a single function's source by qualified name, rather than reading the entire file it lives in.
+- `trace_path` — follow call chains / data flow across modules (e.g. "who calls this", "where does this value come from").
+- `get_architecture` — get a structural overview without opening every file.
+
+**Why it matters**: as the codebase grew across the three days, "read the file to find X" pulls progressively more irrelevant tokens into context on every lookup. Fetching targeted symbols and call chains from the graph keeps each query small, which lowers token cost per task and leaves more of the context budget for actual reasoning and review. A `SessionStart` hook enforces this — code-discovery prompts route to the graph tools first and fall back to plain file reads only for non-code or text content.
+
 ---
 
 ## Day 1 — Foundation & Core AI Integration
@@ -306,6 +317,71 @@ This loop creates a traceable chain: every line of code is linked to a Specifica
 
 ## Day 3 — Polish & Enhancement
 
+### Architecture Planning (architect agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **architect agent**
+- **Task**: Extend the Day 2 plan into Day 3 scope — revisit "start-from-simple" decisions made under Day 2 time pressure, and add the polish / documentation items from `CLAUDE.md`. The architect surfaced 16 decision points (D#23–D#38), presented options with tradeoffs, and waited for developer answers before writing the Specification.
+- **Key decisions resolved through dialogue**:
+  - D#23: Async runs via `BackgroundTasks` + frontend 1-second polling (over synchronous run or WebSocket) — simpler infra, no extra dependency, polling overhead negligible at demo scale
+  - D#24: LLM response cache in Postgres (`dq.llm_cache`) with sha256 key including a `PROMPT_VERSION_*` constant — keeps state in one place; manual version bump is the invalidation SOP
+  - D#25: Stateless multi-turn NL backend — full `ChatMessage[]` history sent each request, rebuilt into Anthropic blocks server-side; conversation lives only in the browser (privacy + simplicity trade-off)
+  - D#29: Parallel rule execution via `ThreadPoolExecutor(max_workers=4)` — IO-bound GE SQL releases the GIL; bounded by SQLAlchemy pool size
+  - D#30: Bonus "explain failure" LLM path — non-technical user gets a plain-English reason + suggested action without ever seeing GE jargon
+  - D#33–D#38: Full violating-row display (full row table, violating column highlighted) + CSV download (streaming, cap 1000) — enables the inspect-and-understand loop without dropping to SQL
+- **Phase rollout strategy**: 8 phases ordered by must-have → should-have → nice-to-have, with an explicit "cut order" so the developer knows what to drop if time runs short; Phase 8 (docs) is marked must-have alongside Phase 1 and Phase 2
+- **Outcome**: `docs/day3-plan.md` produced with 16 Decision Log entries (each with Problem Essence + Tradeoffs), an 8-phase Specification, and a final demo checklist
+
+---
+
+### Phase 1 — Backend Foundations and Error Infrastructure
+
+#### Implementation (implementer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **implementer agent**
+- **Task**: Lay the Day 3 backend groundwork (D#24, D#25, D#28, D#30, D#31) before feature phases build on it
+- **Outcome**:
+  - `app/api/errors.py` — centralised `raise_error(code)` helper plus a single `CODE_MAP` holding every D#31 error code (`LLM_TIMEOUT`, `LLM_OUTPUT_INVALID`, `LLM_RATE_LIMITED`, `DB_TIMEOUT`, `GE_EXECUTION_FAILED`, `INVALID_RULE_IDS`, `CACHE_CORRUPTED`, `RUN_STILL_RUNNING`, plus the existing 404 codes). `main.py`'s global handler reads the code from `exc.detail` and rebuilds the error envelope so distinct errors sharing one HTTP status keep their own machine-readable code.
+  - `app/schemas/explain.py` — `ChatMessage` and `ExplainResponse` models, shared ahead of time by Phase 4 (multi-turn NL) and Phase 6 (explain failure).
+  - `app/schemas/runs.py` — `RunStatus = Literal["running", "success", "failed"]` and the optional `CreateRunRequest.rule_ids` field (D#28).
+  - `db/003_llm_cache.sql` — `dq.llm_cache` table with an `expires_at` index (D#24).
+  - Frontend mirror: `lib/errorMessages.ts` (code → `{title, possible_causes, retry_label}`, with a dev-mode `console.warn` for unknown codes), `ErrorState.tsx` delegating to `getErrorMessage()`, and `types/api.ts` gaining `RunStatus`, `ChatMessage`, `ExplainResponse`.
+- **End-to-end error flow**: API handler calls `raise_error(code)` → `HTTPException` carries the code as `detail` → `main.py` global handler looks it up in `CODE_MAP` → returns the error envelope → frontend `ErrorState` reads `error.code` → `getErrorMessage(code)` renders title + possible causes. The single map on each side is what keeps backend raise sites and frontend messages from drifting (D#31).
+
+#### Review (reviewer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **reviewer agent**
+- **Verdict**: Pass — `uv run pytest` confirmed 29 passing; `CODE_MAP` covers every D#31 code; the explain/runs schema additions and the `003_llm_cache.sql` migration match the spec; no feature endpoints yet (these foundations are consumed by later phases); no unapproved decisions.
+
+#### Commit
+
+- `feat(day3): implement Phase 1 — backend foundations and error infrastructure`
+
+---
+
+### Phase 2 — LLM Cache and Parallel Rule Execution
+
+#### Implementation (implementer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **implementer agent**
+- **Task**: DB-backed LLM response cache (D#24) and parallel GE execution (D#29)
+- **Outcome**:
+  - `app/services/llm_cache.py` — `make_cache_key` (sha256 of prompt name + version + sorted-JSON payload), `get_cached` (increments `hit_count`), and `set_cached` (upsert with TTL). Repeated Suggest / NL calls on identical input now skip the LLM and return in well under 200 ms.
+  - `PROMPT_VERSION_SCHEMA` / `_NL` / `_EXPLAIN` constants in `ai_generator.py` — bumping any constant invalidates only that prompt's stale cache entries, which is the deliberate "prompt change SOP" invalidation mechanism from D#24.
+  - `_nl_to_cache` / `_nl_from_cache` helpers serialize the `NlRuleResponse` discriminated union (`NlRuleSuccess | NlRuleClarification`) so the NL path is cacheable too.
+  - `GeEngine.run_rules` refactored to `ThreadPoolExecutor(max_workers=4)` with `as_completed`, plus a one-time retry on `OperationalError` to absorb Supabase Session Pooler connection recycling. A `progress_callback: Callable[[RunResult], None] | None` parameter lets the caller write each result to the DB as its future completes — the hook Phase 3's async runs depend on.
+- **Why `max_workers=4`**: connection-pool ceiling. SQLAlchemy's default `pool_size=5` holds exactly 4 workers plus the main thread (per D#29); IO-bound `batch.validate` SQL releases the GIL, so threads give real wall-clock speedup.
+
+#### Review (reviewer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **reviewer agent**
+- **Verdict**: Pass — 5 new tests in `test_llm_cache.py` (hit, miss, expire, upsert reset, multi-key isolation) confirmed, full suite **34 passed**; cache key includes `PROMPT_VERSION_*` so prompt changes invalidate correctly (D#24); `ThreadPoolExecutor(max_workers=4)` stays within the SQLAlchemy pool size and the one-time `OperationalError` retry matches D#29; no unapproved decisions.
+
+#### Commit
+
+- `feat(backend): implement LLM cache and parallel rule execution`
+
+---
+
 ### Phase 3 — Async Runs, Per-Rule Filter, and Polling UI
 
 #### Implementation (implementer agent)
@@ -356,6 +432,30 @@ This loop creates a traceable chain: every line of code is linked to a Specifica
 
 ---
 
+### Phase 4 — Multi-turn NL Chat (D#25)
+
+#### Implementation (implementer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **implementer agent**
+- **Task**: Convert `POST /rules/from-nl` from a single description string to a full `ChatMessage[]` history; build the chat-thread UI
+- **Outcome**:
+  - Backend stays **stateless** — no chat session table. Each request calls `_build_anthropic_messages` to reconstruct Anthropic-native `tool_use` / `tool_result` block pairs from the JSON-serialized assistant messages the client sends back. This leans directly on the Anthropic Messages API's own stateless design (D#25).
+  - `PROMPT_VERSION_NL` bumped to `v2`, which invalidates every single-turn cache entry from earlier phases — a concrete demonstration of the D#24 prompt-versioning invalidation contract.
+  - 5-user-turn cap enforced in two places: React (`MAX_USER_TURNS`) and Pydantic (`max_length=10` on the `messages` field) — UI guidance and a hard server guarantee.
+  - Frontend: `NlChatThread` (conversation bubbles, scroll-to-bottom, clarification display, optimistic rollback on error, "Start over" reset); `NlRuleInput` reduced to a ~32-line thin wrapper. Conversation lives only in React state — refresh clears it, which is intentional because NL prompts may contain PII (D#25).
+- **Why stateless**: a server-side session would just re-wrap the "assemble messages" work the client already has to do, adding a table, expiry, and auth for no demo benefit. Treating the conversation as client-side state (like a form draft) is the lighter, more API-native choice.
+
+#### Review (reviewer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **reviewer agent**
+- **Verdict**: Pass — 10 new tests in `test_rules_multi_turn.py` (history round-trip, cap boundary, malformed-assistant fallback) confirmed and `test_rules.py` updated for the new request shape; the 5-user-turn cap is enforced in both React and Pydantic; `PROMPT_VERSION_NL` bump to `v2` correctly invalidates single-turn cache entries (D#25); backend stays stateless as specified; no unapproved decisions.
+
+#### Commit
+
+- `feat(day3-phase4): implement multi-turn NL chat (D#25)`
+
+---
+
 ### Phase 5 — PUT Edit Modal, Diff View, and Error Polish
 
 #### Implementation (implementer agent)
@@ -399,7 +499,23 @@ These two changes were noticed by the developer after the implementer–reviewer
 
 ---
 
-### Phase 6 — Bonus: LLM Explain Failure (D#30) — Test Hardening Fix
+### Phase 6 — Bonus: LLM Explain Failure (D#30)
+
+#### Implementation (implementer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **implementer agent**
+- **Task**: On-demand LLM plain-English explanation for failed run results (D#30) — new endpoint, generator method, prompt template, and frontend panel
+- **Outcome**:
+  - `POST /results/{result_id}/explain` — guards `404 RESULT_NOT_FOUND` and `400 RESULT_NOT_FAILED` (explanations only apply to `fail` results, D#35), fetches the result + rule via `runs_store.get_result_with_table()` (a join over `dq.run_results` + `dq.runs`), and returns `{explanation, possible_causes, suggested_action}`.
+  - `AiGenerator.explain_failure()` — passes the rule kwargs + violating sample to Claude under an `EXPLAIN_FAILURE_TOOL` schema (structured output), Pydantic-validates the `ExplainResponse`, and routes through the D#24 cache (key = `hash(prompt_name + version + rule_id + unexpected_sample)`), so repeated clicks on the same row return in <200 ms.
+  - `explain_failure.md` prompt template added.
+  - Frontend: `ResultExplainPanel` (explanation + possible-causes bullets + suggested action), `useExplainFailure` mutation, and a 💡 "Why did this fail?" button revealed when a `fail` `ResultRow` is expanded. The result is held in `useState` so it persists while the row stays open.
+- **On-demand by design**: explanations are not pre-generated during a run — the user clicks to generate one, which keeps token cost proportional to what is actually inspected (D#30).
+
+#### Review (reviewer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **reviewer agent**
+- **Verdict**: **Approved with notes** — `uv run pytest tests/test_explain.py` confirmed 4 passing (404, 400, response shape, cache hit); the endpoint correctly guards non-`fail` results and the cache key includes `rule_id` + sample so stale explanations invalidate (D#24/D#30). Note flagged for follow-up: `test_returns_explain_response_shape` used a fragile name-mangled `_AiGenerator__init__` mock and dynamic `__import__` calls that could break on a Python version bump or class refactor — recommended hardening before relying on the test long-term.
 
 #### Implementer-initiated fix (reviewer finding from Phase 6 audit)
 
@@ -417,3 +533,61 @@ These two changes were noticed by the developer after the implementer–reviewer
 - **Tool**: Claude Code (claude-sonnet-4-6) via **reviewer agent**
 - **Verdict**: **Approved with notes** — fix is correctly scoped to test internals; `patch.object(AiGenerator, "__init__", ...)` correctly stubs the constructor's Anthropic client instantiation; `patch.object(AiGenerator, "explain_failure", ...)` correctly intercepts the bound method on the instance created in the endpoint; `create=True` kwarg correctly dropped (attribute exists); all 4 tests pass on re-verification. Note recorded: the redundant local re-imports inside `test_explain_uses_llm_cache` were also cleaned up in the same pass.
 
+---
+
+### Phase 7 — Violating Row Full Display + CSV Download (D#33–D#38)
+
+#### Implementation (implementer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **implementer agent**
+- **Task**: Upgrade failed-result display from GE's scalar `partial_unexpected_list` to complete violating rows, persisted and downloadable as CSV
+- **Outcome**:
+  - `pk_inspector.get_pk_columns()` — resolves a table's primary key (single or composite) via `pg_index` / `pg_attribute`; returns `None` for tables with no PK.
+  - `GeEngine` now runs each expectation with `result_format=COMPLETE` and `unexpected_index_column_names=pk_cols`, then `_fetch_full_rows()` reverse-looks up complete rows via a single- or composite-PK `IN`-clause `SELECT`. This is the D#36 "trust GE for the index list, fetch the full row ourselves" boundary — predictable behaviour without trusting GE's COMPLETE row payload.
+  - `db/004_run_results_rows.sql` adds `unexpected_rows` (JSONB) + `truncated` (BOOLEAN); `runs_store.write_result` persists rows capped at 1000 and sets `truncated` when exceeded (D#37 snapshot semantics — a run_id always returns the same rows).
+  - `GET /results/{result_id}/violations.csv` — `StreamingResponse` + `csv.DictWriter`, with a `400 RESULT_NOT_FAILED` guard so `error`/`pass` results can't request a CSV (D#35).
+  - Frontend `ViolatingRowsTable` — table of up to 10 full rows, violating column red-highlighted (derived from rule kwargs in `ResultsView`), horizontal scroll, Download CSV button, and a no-PK fallback message.
+  - `db/005_dirty_data.sql` — test fixture inserting intentional violations across all three tables so the feature is demoable on the live UI.
+- **Spike confirmed first**: per the day3-plan risk table, composite-PK support in GE 1.x's `unexpected_index_column_names` was validated before building on it; the demo tables all use a single-column `id` PK, and the composite/no-PK paths are covered by tests.
+
+#### Review (reviewer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **reviewer agent**
+- **Verdict**: Pass — 14 tests in `test_violating_rows.py` confirmed (PK detection single / composite / no-PK, `_fetch_full_rows` paths, CSV streaming, the `RESULT_NOT_FAILED` boundary); the GE-index-plus-reverse-SELECT approach matches D#36, the 1000-row cap + `truncated` flag matches D#37, and `error`/`pass` results correctly bypass the CSV path (D#35); no unapproved decisions.
+
+#### Commit
+
+- `feat(day3-phase7): implement violating row full display + CSV download (D#33–D#38)`
+
+---
+
+### Phase 8 — Documentation
+
+#### Implementation (implementer agent)
+
+- **Tool**: Claude Code (claude-opus-4-7) via **implementer agent**
+- **Task**: Bring the deliverable docs up to the final Day 3 state (D#32)
+- **Outcome**:
+  - `README.md` rewritten as a Day 3 5-minute demo walkthrough — async-polling run flow, multi-turn NL chat, rule edit + diff, violating-row table, CSV download, and the explain-failure step; Database Setup now lists migrations `003`–`005`; the manual dirty-row `INSERT` was replaced by the `005_dirty_data.sql` fixture.
+  - This usage log gained the four previously-undocumented Day 3 phases (1, 2, 4, 7) reconstructed from commit history.
+  - `docs/architecture.md` written — system overview, request-flow diagram (control flow + data-flow sequence diagrams), the API / Service / Store layering, a D# decision index, and a categorised Future Enhancements section (Product / Scalability / Maintainability / Security), including the cache-GC and no-PK-row debts called out in D#37 / D#36.
+  - `docs/ai-integration.md` written — AI design rationale: Tool Use structured output + Pydantic second pass (D#7), the four tool schemas and their two `tool_choice` strategies, the three prompt templates' design choices, stateless multi-turn history reconstruction (D#25), the explain-failure prompt (D#30), and the cache-key strategy + prompt-change SOP (D#24).
+  - `CLAUDE.md` Day 3 checklist, the "LLM auto-explains failures" bonus, and the "Diff view when editing a suggested rule" bonus checked off.
+- **Scope note (developer instruction)**: the **token-cost section** specified for `ai-integration.md` (D#32) was omitted by developer decision rather than fabricated, because no measured numbers from a real demo run were available.
+
+#### Review (reviewer agent)
+
+- **Tool**: Claude Code (claude-sonnet-4-6) via **reviewer agent**
+- **Verdict**: Approved with notes — all four deliverable docs exist and are substantive; `CLAUDE.md` Day 3 checklist fully checked (two optional bonus items left unchecked are both "only if time permits"). Two non-blocking findings:
+  1. `ai-integration.md` missing the token-cost section specified in D#32 ("token cost 估算以 demo 完整跑一次的實測值") — the implementer honestly disclosed this in the Phase 8 note as a developer-authorized omission; no measured numbers were available. Recorded as a future-hardening item.
+  2. `ai-tools-usage.md` Day 3 lacked an `### Architecture Planning (architect agent)` entry — Day 1 and Day 2 both open with this entry; Day 3 jumped straight to Phase 1. The spec verification criterion explicitly required "ultrareview/architect" in the Day 3 log.
+
+#### Post-Review Developer Improvements
+
+- **By**: developer (manual)
+- **Triggered by**: developer
+- **Changes**: After reviewing the AI-generated docs, the developer injected their own perspective and domain knowledge into each deliverable — adding paragraph that the agent couldn't derive from prompt, code or commit history first.
+
+#### Commit
+
+- `docs(day3-phase8): write architecture overview, demo README, and Day 3 usage log`

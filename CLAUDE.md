@@ -192,18 +192,18 @@ Granular checklist mirroring spec's Day 1/2/3 outline. Update as work progresses
   - [x] Re-run button (same "Run checks" button)
 
 ### Day 3 — Polish & Enhancement
-- [ ] Error handling: graceful UI for failed LLM call, DB timeout, GE crash
-- [ ] Input validation: reject malformed NL inputs; LLM `needs_clarification` flow in UI
-- [ ] Caching: avoid re-calling LLM with identical schema+sample (hash-based)
-- [ ] UI polish: empty states, hover affordances, keyboard nav, mobile layout
-- [ ] Performance: parallel rule execution where independent; cap sample row size sent to LLM
-- [ ] `docs/architecture.md` (incl. future enhancements section)
-- [ ] `docs/ai-integration.md`
-- [ ] `docs/ai-tools-usage.md`
-- [ ] README — end-to-end "5-minute demo" walkthrough
+- [x] Error handling: graceful UI for failed LLM call, DB timeout, GE crash
+- [x] Input validation: reject malformed NL inputs; LLM `needs_clarification` flow in UI
+- [x] Caching: avoid re-calling LLM with identical schema+sample (hash-based)
+- [x] UI polish: empty states, hover affordances, keyboard nav (mobile layout descoped → Future Enhancements)
+- [x] Performance: parallel rule execution where independent; cap sample row size sent to LLM
+- [x] `docs/architecture.md` (incl. future enhancements section)
+- [x] `docs/ai-integration.md`
+- [x] `docs/ai-tools-usage.md`
+- [x] README — end-to-end "5-minute demo" walkthrough
 
 ### Bonus (only if time permits)
-- [ ] LLM auto-explains failures in plain English on Results Dashboard
+- [x] LLM auto-explains failures in plain English on Results Dashboard
 - [ ] One-click "fix data" suggestions for failed rows
-- [ ] Diff view when editing a suggested rule
+- [x] Diff view when editing a suggested rule
 - [ ] Export rules as a GE checkpoint YAML

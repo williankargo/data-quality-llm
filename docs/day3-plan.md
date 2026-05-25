@@ -1019,7 +1019,7 @@ Tasks (順序):
 1. `README.md` 5-minute demo walkthrough（含 INSERT dirty row + 完整 click-through path）。
 2. `docs/ai-tools-usage.md` 續寫 Day 2 + Day 3 entries（從 git log + 對話歷史摘要）。
 3. `docs/architecture.md` 系統總覽 + Future Enhancements 章節（D#19 / D#22 / Celery / PII / multi-user）。
-4. `docs/ai-integration.md` Prompt 設計 + Tool Use schemas + cache key 策略 + multi-turn 處理 + token cost 估算。
+4. `docs/ai-integration.md` Prompt 設計 + Tool Use schemas + cache key 策略 + multi-turn 處理。
 5. 把 `CLAUDE.md` Task Breakdown Day 3 checkbox 全部勾掉。
 
 **Verification**:
@@ -1033,23 +1033,23 @@ Tasks (順序):
 
 Day 3 結束時下列全部為 true：
 
-- [ ] `db/003_llm_cache.sql` 已在 Supabase 跑過。
-- [ ] `POST /runs` 回 202 + `status:'running'`；BackgroundTask 完成後 `dq.runs.status` flip 為 `success`/`failed`。
-- [ ] 前端輪詢 `GET /runs/{id}` 直到結束；UI 顯示進度。
-- [ ] `dq.llm_cache` 連續 Suggest 同表後 `hit_count >= 1`。
-- [ ] `POST /rules/from-nl` 接受 `messages: ChatMessage[]`；前端 chat thread 可 5 輪對話。
-- [ ] `RuleEditModal` 可改 rule，diff view 顯示變更；JSON 錯誤 inline 顯示。
-- [ ] `POST /runs` 帶 `rule_ids` 只跑指定 rules；錯誤 ids 回 `INVALID_RULE_IDS`。
-- [ ] `POST /results/{id}/explain` 對 fail row 回傳 LLM 解釋；前端 💡 按鈕顯示 panel。
-- [ ] `ErrorState` 對每個 new code 都有 possible_causes 列表。
-- [ ] `db/004_run_results_rows.sql` 已在 Supabase 跑過；`dq.run_results.unexpected_rows` JSONB 與 `truncated` 兩欄存在。
-- [ ] Fail row 展開後顯示表格、最多 10 筆完整 row；違規欄位以紅底 highlight；欄位多時可橫向 scroll。
-- [ ] 「Download all violations (CSV)」按鈕可下載完整違規 row CSV，Excel 可開、row 數 = unexpected_count（cap 1000）。
-- [ ] 對 status='error' 結果 hit CSV endpoint 回 `400 RESULT_NOT_FAILED`；無 PK 表 UI 顯示 fallback 訊息。
-- [ ] `docs/architecture.md` Future Enhancements 章節明列「定期清除 stale unexpected_rows / run history 的 cron job 或 SOP」與「無 PK 表的 row data 撈取策略」兩條。
-- [ ] `README.md` 5-minute demo 可在 fresh clone 重現。
-- [ ] `docs/architecture.md`、`docs/ai-integration.md`、`docs/ai-tools-usage.md` 三份新文件已寫。
-- [ ] `CLAUDE.md` Day 3 checklist 全部勾起；Bonus checkbox `LLM auto-explains failures` 勾起。
+- [x] `db/003_llm_cache.sql` 已在 Supabase 跑過。
+- [x] `POST /runs` 回 202 + `status:'running'`；BackgroundTask 完成後 `dq.runs.status` flip 為 `success`/`failed`。
+- [x] 前端輪詢 `GET /runs/{id}` 直到結束；UI 顯示進度。
+- [x] `dq.llm_cache` 連續 Suggest 同表後 `hit_count >= 1`。
+- [x] `POST /rules/from-nl` 接受 `messages: ChatMessage[]`；前端 chat thread 可 5 輪對話。
+- [x] `RuleEditModal` 可改 rule，diff view 顯示變更；JSON 錯誤 inline 顯示。
+- [x] `POST /runs` 帶 `rule_ids` 只跑指定 rules；錯誤 ids 回 `INVALID_RULE_IDS`。
+- [x] `POST /results/{id}/explain` 對 fail row 回傳 LLM 解釋；前端 💡 按鈕顯示 panel。
+- [x] `ErrorState` 對每個 new code 都有 possible_causes 列表。
+- [x] `db/004_run_results_rows.sql` 已在 Supabase 跑過；`dq.run_results.unexpected_rows` JSONB 與 `truncated` 兩欄存在。
+- [x] Fail row 展開後顯示表格、最多 10 筆完整 row；違規欄位以紅底 highlight；欄位多時可橫向 scroll。
+- [x] 「Download all violations (CSV)」按鈕可下載完整違規 row CSV，Excel 可開、row 數 = unexpected_count（cap 1000）。
+- [x] 對 status='error' 結果 hit CSV endpoint 回 `400 RESULT_NOT_FAILED`；無 PK 表 UI 顯示 fallback 訊息。
+- [x] `docs/architecture.md` Future Enhancements 章節明列「定期清除 stale unexpected_rows / run history 的 cron job 或 SOP」與「無 PK 表的 row data 撈取策略」兩條。
+- [x] `README.md` 5-minute demo 可在 fresh clone 重現。
+- [x] `docs/architecture.md`、`docs/ai-integration.md`、`docs/ai-tools-usage.md` 三份新文件已寫。
+- [x] `CLAUDE.md` Day 3 checklist 全部勾起；Bonus checkbox `LLM auto-explains failures` 勾起。
 
 **「若時間不夠」的可砍順序**（從上往下砍）：
 
