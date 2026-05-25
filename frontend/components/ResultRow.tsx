@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { ExplainResponse, RunResult } from "@/types/api";
 import { useExplainFailure } from "@/lib/mutations";
 import { ResultExplainPanel } from "./ResultExplainPanel";
+import { ViolatingRowsTable } from "./ViolatingRowsTable";
 
 const STATUS_STYLES = {
   pass: {
@@ -28,22 +29,14 @@ const STATUS_STYLES = {
 interface ResultRowProps {
   result: RunResult;
   description: string | null;
+  violatingColumns: string[];
 }
 
-export function ResultRow({ result, description }: ResultRowProps) {
+export function ResultRow({ result, description, violatingColumns }: ResultRowProps) {
   const [expanded, setExpanded] = useState(false);
   const [explanation, setExplanation] = useState<ExplainResponse | null>(null);
   const style = STATUS_STYLES[result.status];
   const explainMutation = useExplainFailure();
-
-  const hasSample =
-    result.status === "fail" &&
-    result.unexpected_sample &&
-    result.unexpected_sample.length > 0;
-
-  const sampleText = hasSample
-    ? result.unexpected_sample!.map((v) => JSON.stringify(v)).join(", ")
-    : null;
 
   function handleExplain() {
     explainMutation.mutate(result.id, {
@@ -61,7 +54,9 @@ export function ResultRow({ result, description }: ResultRowProps) {
           </p>
 
           {result.status === "pass" && (
-            <p className={`text-xs font-medium mt-1 ${STATUS_STYLES.pass.badge} inline-block px-1.5 py-0.5 rounded`}>
+            <p
+              className={`text-xs font-medium mt-1 ${STATUS_STYLES.pass.badge} inline-block px-1.5 py-0.5 rounded`}
+            >
               {style.label}
             </p>
           )}
@@ -71,8 +66,7 @@ export function ResultRow({ result, description }: ResultRowProps) {
               <p className="text-sm text-red-700">
                 {result.unexpected_count !== null
                   ? `${result.unexpected_count} violating row${result.unexpected_count !== 1 ? "s" : ""}.`
-                  : "Violations found."}{" "}
-                {sampleText && <>Sample: [{sampleText}]</>}
+                  : "Violations found."}
               </p>
               <button
                 onClick={() => setExpanded((p) => !p)}
@@ -83,38 +77,35 @@ export function ResultRow({ result, description }: ResultRowProps) {
 
               {expanded && (
                 <div className="mt-2">
-                  {hasSample && (
-                    <ul className="space-y-1 mb-3">
-                      {result.unexpected_sample!.map((v, i) => (
-                        <li
-                          key={i}
-                          className="text-xs font-mono text-red-700 bg-red-100 px-2 py-0.5 rounded"
-                        >
-                          {JSON.stringify(v)}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                  {/* Violating rows table (D#38) */}
+                  <ViolatingRowsTable
+                    rows={result.unexpected_rows ?? []}
+                    violatingColumns={violatingColumns}
+                    truncated={result.truncated}
+                    totalCount={result.unexpected_count ?? (result.unexpected_rows?.length ?? 0)}
+                    resultId={result.id}
+                  />
 
-                  {explanation ? (
-                    <ResultExplainPanel data={explanation} />
-                  ) : (
-                    <button
-                      onClick={handleExplain}
-                      disabled={explainMutation.isPending}
-                      className="text-xs text-yellow-700 border border-yellow-400 bg-yellow-50 hover:bg-yellow-100 px-2 py-1 rounded disabled:opacity-50"
-                    >
-                      {explainMutation.isPending
-                        ? "Analyzing…"
-                        : "💡 Why did this fail?"}
-                    </button>
-                  )}
+                  {/* LLM explain button (D#30) */}
+                  <div className="mt-3">
+                    {explanation ? (
+                      <ResultExplainPanel data={explanation} />
+                    ) : (
+                      <button
+                        onClick={handleExplain}
+                        disabled={explainMutation.isPending}
+                        className="text-xs text-yellow-700 border border-yellow-400 bg-yellow-50 hover:bg-yellow-100 px-2 py-1 rounded disabled:opacity-50"
+                      >
+                        {explainMutation.isPending ? "Analyzing…" : "💡 Why did this fail?"}
+                      </button>
+                    )}
 
-                  {explainMutation.isError && (
-                    <p className="mt-1 text-xs text-red-600">
-                      Could not load explanation. Please try again.
-                    </p>
-                  )}
+                    {explainMutation.isError && (
+                      <p className="mt-1 text-xs text-red-600">
+                        Could not load explanation. Please try again.
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -127,9 +118,7 @@ export function ResultRow({ result, description }: ResultRowProps) {
                   ? `Error: ${result.error_message}`
                   : "Rule execution failed."}
               </p>
-              <p className="text-xs text-amber-600 mt-0.5">
-                Check the rule configuration.
-              </p>
+              <p className="text-xs text-amber-600 mt-0.5">Check the rule configuration.</p>
             </div>
           )}
         </div>

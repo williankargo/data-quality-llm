@@ -94,6 +94,8 @@ export interface RunResult {
   success: boolean;
   unexpected_count: number | null;
   unexpected_sample: unknown[] | null;
+  unexpected_rows: Record<string, unknown>[] | null; // D#33: full row dicts, fail+PK only
+  truncated: boolean;                                // D#37: capped at 1000
   observed_value: unknown | null;
   error_message: string | null;
 }

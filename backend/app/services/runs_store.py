@@ -66,10 +66,12 @@ def write_result(
         """
         INSERT INTO dq.run_results
             (run_id, rule_id, expectation_type, success,
-             unexpected_count, unexpected_sample, observed_value, raw_result, status)
+             unexpected_count, unexpected_sample, observed_value, raw_result, status,
+             unexpected_rows, truncated)
         VALUES
             (:run_id, :rule_id, :expectation_type, :success,
-             :unexpected_count, :unexpected_sample, :observed_value, CAST(:raw_result AS JSONB), :status)
+             :unexpected_count, :unexpected_sample, :observed_value, CAST(:raw_result AS JSONB), :status,
+             CAST(:unexpected_rows AS JSONB), :truncated)
         """
     )
     session.execute(
@@ -92,6 +94,12 @@ def write_result(
             ),
             "raw_result": raw_result,
             "status": result.status,
+            "unexpected_rows": (
+                json.dumps(result.unexpected_rows)
+                if result.unexpected_rows is not None
+                else None
+            ),
+            "truncated": result.truncated,
         },
     )
     session.commit()
@@ -209,6 +217,8 @@ def _row_to_result(row) -> RunResult:
         success=row.success,
         unexpected_count=row.unexpected_count,
         unexpected_sample=row.unexpected_sample,
+        unexpected_rows=row.unexpected_rows,          # JSONB → Python list[dict] or None
+        truncated=bool(row.truncated) if row.truncated is not None else False,
         observed_value=row.observed_value,
         error_message=error_msg,
     )

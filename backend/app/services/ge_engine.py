@@ -3,21 +3,32 @@
 Uses an ephemeral context (no GE file store) so all state lives in memory.
 DATABASE_URL dialect prefix is stripped before passing to GE (D#16).
 Rules are validated in parallel via ThreadPoolExecutor(max_workers=4) (D#29).
+Violating rows are fetched as complete row dicts via PK index lookup (D#33/D#36).
 """
 
+import json
 import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import great_expectations as gx
+from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.schemas.rules import RuleRecord
 from app.schemas.runs import ResultStatus, RunResult
+from app.services.db import get_session
+from app.services.pk_inspector import get_pk_columns
 
-_RESULT_FORMAT = {"result_format": "SUMMARY", "partial_unexpected_count": 3}
+# COMPLETE format returns partial_unexpected_index_list when
+# unexpected_index_column_names is set (D#36). Cap 1000 per D#37.
+_RESULT_FORMAT: dict = {
+    "result_format": "COMPLETE",
+    "partial_unexpected_count": 1000,
+}
 _MAX_WORKERS = 4
 
 
@@ -48,12 +59,15 @@ class GeEngine:
         self,
         table_name: str,
         rules: list[RuleRecord],
+        session: Session | None = None,
         progress_callback: Callable[[RunResult], None] | None = None,
     ) -> list[RunResult]:
         """Validate every rule against the table in parallel; return one RunResult per rule.
 
         progress_callback is invoked from the *calling* thread after each future
         completes, so it is safe to use a shared SQLAlchemy Session inside it.
+        session is used to look up PK columns once before the executor starts;
+        each thread opens its own session for _fetch_full_rows.
         """
         asset = self.datasource.add_table_asset(
             name=f"asset_{table_name}",
@@ -62,15 +76,38 @@ class GeEngine:
         batch_def = asset.add_batch_definition_whole_table(name=f"batch_{table_name}")
         batch = batch_def.get_batch()
 
+        # Resolve PK columns once in the main thread (D#36).
+        pk_cols: list[str] | None = None
+        if session is not None:
+            try:
+                pk_cols = get_pk_columns(session, table_name)
+            except Exception:
+                pk_cols = None  # be defensive; fallback to no-PK path
+
+        # Build result_format once; threads get a shallow copy with optional pk field.
+        base_fmt = dict(_RESULT_FORMAT)
+        if pk_cols:
+            base_fmt["unexpected_index_column_names"] = pk_cols
+
         def _run_one(rule: RuleRecord) -> RunResult:
             try:
                 expectation = self._build_expectation(rule.expectation_type, rule.kwargs)
                 try:
-                    ge_result = batch.validate(expectation, result_format=_RESULT_FORMAT)
+                    ge_result = batch.validate(expectation, result_format=base_fmt)
                 except OperationalError:
-                    # Retry once on connection-recycle errors from Supabase Session Pooler (D#29)
-                    ge_result = batch.validate(expectation, result_format=_RESULT_FORMAT)
-                return self._normalize_pass_fail(rule, ge_result)
+                    # Retry once on connection-recycle errors from Supabase Session Pooler (D#29).
+                    ge_result = batch.validate(expectation, result_format=base_fmt)
+                result = self._normalize_pass_fail(rule, ge_result)
+
+                # Fetch complete rows for failed results when we have PK columns (D#36/D#33).
+                if result.status == "fail" and pk_cols:
+                    index_list: list[dict] = (ge_result.result or {}).get(
+                        "partial_unexpected_index_list"
+                    ) or []
+                    result.unexpected_rows = self._fetch_full_rows(table_name, pk_cols, index_list)
+                    result.truncated = len(index_list) >= 1000
+
+                return result
             except Exception as exc:
                 return self._normalize_error(rule, exc)
 
@@ -105,7 +142,6 @@ class GeEngine:
         # rather than status="fail" (D#18).
         exc_info = getattr(ge_result, "exception_info", {}) or {}
         if self._exception_was_raised(exc_info):
-            # Extract the first exception message found in the exception_info payload.
             msg = self._first_exception_message(exc_info) or "GE raised an internal exception"
             return self._normalize_error(rule, Exception(msg))
 
@@ -120,9 +156,55 @@ class GeEngine:
             success=bool(ge_result.success),
             unexpected_count=result_dict.get("unexpected_count"),
             unexpected_sample=raw_sample[:3] if raw_sample else None,
+            unexpected_rows=None,
+            truncated=False,
             observed_value=result_dict.get("observed_value"),
             error_message=None,
         )
+
+    def _fetch_full_rows(
+        self,
+        table_name: str,
+        pk_cols: list[str],
+        index_list: list[dict],
+    ) -> list[dict]:
+        """Fetch complete rows from *table_name* whose PKs appear in *index_list*.
+
+        index_list is [{"id": 42}, {"id": 107}, ...] for single PK, or
+        [{"col_a": 1, "col_b": 2}, ...] for composite PK (D#36).
+        Opens its own DB session so it is safe to call from worker threads.
+        """
+        if not index_list:
+            return []
+
+        with get_session() as session:
+            if len(pk_cols) == 1:
+                pk_col = pk_cols[0]
+                values = [row[pk_col] for row in index_list if pk_col in row]
+                if not values:
+                    return []
+                placeholders = ", ".join(f":v{i}" for i in range(len(values)))
+                params: dict = {f"v{i}": v for i, v in enumerate(values)}
+                sql = text(
+                    f'SELECT * FROM public."{table_name}" WHERE "{pk_col}" IN ({placeholders})'
+                )
+            else:
+                # Composite PK: WHERE (col_a, col_b) IN ((v0_0, v0_1), (v1_0, v1_1), ...)
+                col_expr = ", ".join(f'"{c}"' for c in pk_cols)
+                row_parts: list[str] = []
+                params = {}
+                for i, row in enumerate(index_list):
+                    cell_placeholders = ", ".join(f":r{i}_{j}" for j in range(len(pk_cols)))
+                    row_parts.append(f"({cell_placeholders})")
+                    for j, col in enumerate(pk_cols):
+                        params[f"r{i}_{j}"] = row.get(col)
+                sql = text(
+                    f'SELECT * FROM public."{table_name}"'
+                    f" WHERE ({col_expr}) IN ({', '.join(row_parts)})"
+                )
+
+            rows = session.execute(sql, params).fetchall()
+            return [_serialize_row(dict(r._mapping)) for r in rows]
 
     @staticmethod
     def _exception_was_raised(exc_info: dict) -> bool:
@@ -132,10 +214,8 @@ class GeEngine:
         - Flat (normal validation): {"raised_exception": bool, ...}
         - Nested (metric error): {<metric_id>: {"raised_exception": bool, ...}, ...}
         """
-        # Flat shape
         if "raised_exception" in exc_info:
             return bool(exc_info["raised_exception"])
-        # Nested shape: any metric entry with raised_exception=True is sufficient
         for value in exc_info.values():
             if isinstance(value, dict) and value.get("raised_exception"):
                 return True
@@ -144,10 +224,8 @@ class GeEngine:
     @staticmethod
     def _first_exception_message(exc_info: dict) -> str | None:
         """Extract the first non-None exception_message from exc_info."""
-        # Flat shape
         if "exception_message" in exc_info:
             return exc_info.get("exception_message")
-        # Nested shape
         for value in exc_info.values():
             if isinstance(value, dict) and value.get("exception_message"):
                 return value["exception_message"]
@@ -162,6 +240,23 @@ class GeEngine:
             success=False,
             unexpected_count=None,
             unexpected_sample=None,
+            unexpected_rows=None,
+            truncated=False,
             observed_value=None,
             error_message=_sanitize_error(str(exc)),
         )
+
+
+def _serialize_row(row: dict) -> dict:
+    """Convert non-JSON-serializable values (Decimal, date, etc.) to strings."""
+    out: dict = {}
+    for k, v in row.items():
+        if v is None:
+            out[k] = None
+        else:
+            try:
+                json.dumps(v)
+                out[k] = v
+            except (TypeError, ValueError):
+                out[k] = str(v)
+    return out

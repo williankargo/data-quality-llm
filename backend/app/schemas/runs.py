@@ -17,6 +17,8 @@ class RunResult(BaseModel):
     success: bool
     unexpected_count: int | None
     unexpected_sample: list[Any] | None
+    unexpected_rows: list[dict] | None = None   # D#33: full row dicts, fail+PK only
+    truncated: bool = False                      # D#37: True if capped at 1000
     observed_value: Any | None
     error_message: str | None
 

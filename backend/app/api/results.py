@@ -1,6 +1,10 @@
 """Results API: run GE checks against a table and retrieve run history."""
 
+import csv
+import io
+
 from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.errors import raise_error
@@ -31,6 +35,7 @@ def _execute_run(run_id: int, table_name: str, rule_ids: list[int] | None) -> No
             engine.run_rules(
                 table_name,
                 rules,
+                session=session,
                 progress_callback=lambda r: write_result(
                     session, run_id=run_id, rule_id=r.rule_id, result=r
                 ),
@@ -112,3 +117,50 @@ def explain_result(result_id: int, session: Session = Depends(get_db)) -> Explai
     except LlmOutputError as exc:
         raise_error("LLM_OUTPUT_INVALID", str(exc))
         return None  # unreachable
+
+
+@router.get("/results/{result_id}/violations.csv")
+def download_violations_csv(
+    result_id: int,
+    session: Session = Depends(get_db),
+) -> StreamingResponse:
+    """Stream violating rows for a failed result as a CSV file (D#34/D#37).
+
+    Only available for results with status='fail'. Returns RESULT_NOT_FAILED for
+    pass/error results (D#35). Returns RESULT_NOT_FOUND for unknown result IDs.
+    """
+    pair = get_result_with_table(session, result_id)
+    if pair is None:
+        raise_error("RESULT_NOT_FOUND")
+        return None  # unreachable
+
+    result, _ = pair
+    if result.status != "fail":
+        raise_error("RESULT_NOT_FAILED")
+        return None  # unreachable
+
+    rows = result.unexpected_rows or []
+    filename = f"violations_result{result_id}.csv"
+
+    def _generate():
+        if not rows:
+            yield "# No row data available (table has no primary key)\n"
+            return
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        yield buf.getvalue()
+        buf.seek(0)
+        buf.truncate()
+        for row in rows:
+            safe_row = {k: ("" if v is None else str(v)) for k, v in row.items()}
+            writer.writerow(safe_row)
+            yield buf.getvalue()
+            buf.seek(0)
+            buf.truncate()
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

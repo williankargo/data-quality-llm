@@ -11,6 +11,14 @@ import { ErrorState } from "./ErrorState";
 import { ApiError } from "@/lib/api";
 import type { RunDetail } from "@/types/api";
 
+function deriveViolatingColumns(kwargs: Record<string, unknown>): string[] {
+  const cols: string[] = [];
+  if (typeof kwargs.column === "string") cols.push(kwargs.column);
+  if (typeof kwargs.column_A === "string") cols.push(kwargs.column_A);
+  if (typeof kwargs.column_B === "string") cols.push(kwargs.column_B);
+  return cols;
+}
+
 interface ResultsViewProps {
   tableName: string;
 }
@@ -98,6 +106,10 @@ export function ResultsView({ tableName }: ResultsViewProps) {
 
   const descriptionMap = new Map<number, string>(
     (rulesQuery.data ?? []).map((r) => [r.id, r.description])
+  );
+
+  const kwargsMap = new Map<number, Record<string, unknown>>(
+    (rulesQuery.data ?? []).map((r) => [r.id, r.kwargs])
   );
 
   const isInitialLoading =
@@ -189,15 +201,21 @@ export function ResultsView({ tableName }: ResultsViewProps) {
                 : "Run in progress — results updating..."}
             </p>
           )}
-          {run.results.map((result) => (
-            <ResultRow
-              key={result.id}
-              result={result}
-              description={
-                result.rule_id !== null ? (descriptionMap.get(result.rule_id) ?? null) : null
-              }
-            />
-          ))}
+          {run.results.map((result) => {
+            const kwargs =
+              result.rule_id !== null ? (kwargsMap.get(result.rule_id) ?? {}) : {};
+            const violatingColumns = deriveViolatingColumns(kwargs);
+            return (
+              <ResultRow
+                key={result.id}
+                result={result}
+                description={
+                  result.rule_id !== null ? (descriptionMap.get(result.rule_id) ?? null) : null
+                }
+                violatingColumns={violatingColumns}
+              />
+            );
+          })}
         </div>
       )}
 
