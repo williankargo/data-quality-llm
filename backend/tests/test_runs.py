@@ -7,6 +7,7 @@ Endpoint tests mock GeEngine and all store helpers so no live DB or GE
 calls are made.
 """
 
+import json
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
@@ -17,6 +18,7 @@ from app.main import app
 from app.schemas.rules import RuleRecord
 from app.schemas.runs import RunDetail, RunResult, RunSummary
 from app.services.runs_store import (
+    _JsonEncoder,
     create_run,
     finalize_run,
     get_run,
@@ -89,6 +91,8 @@ _P_GET_RUN = "app.api.results.get_run"
 _P_LIST_RUNS = "app.api.results.list_runs"
 _P_GE_ENGINE = "app.api.results.GeEngine"
 _P_EXECUTE_RUN = "app.api.results._execute_run"
+_P_GET_TABLE_COLUMNS = "app.api.results.get_table_columns"
+_P_GET_SESSION = "app.api.results.get_session"
 
 SAMPLE_RUNNING_DETAIL = RunDetail(
     id=1,
@@ -102,6 +106,99 @@ SAMPLE_RUNNING_DETAIL = RunDetail(
     error_count=0,
     results=[],
 )
+
+
+# ---------------------------------------------------------------------------
+# _JsonEncoder unit tests (no DB, no GE)
+# ---------------------------------------------------------------------------
+
+
+class TestJsonEncoder:
+    """_JsonEncoder must serialise date/datetime/Decimal without raising."""
+
+    def test_date(self):
+        import datetime as dt
+        result = json.dumps(dt.date(2024, 6, 1), cls=_JsonEncoder)
+        assert result == '"2024-06-01"'
+
+    def test_datetime(self):
+        import datetime as dt
+        result = json.dumps(dt.datetime(2024, 6, 1, 12, 0, 0), cls=_JsonEncoder)
+        assert result == '"2024-06-01T12:00:00"'
+
+    def test_decimal(self):
+        import decimal
+        result = json.dumps(decimal.Decimal("3.14"), cls=_JsonEncoder)
+        assert result == "3.14"
+
+    def test_list_with_dates(self):
+        import datetime as dt
+        payload = [dt.date(2025, 1, 1), dt.date(2020, 12, 31)]
+        result = json.loads(json.dumps(payload, cls=_JsonEncoder))
+        assert result == ["2025-01-01", "2020-12-31"]
+
+    def test_unknown_type_still_raises(self):
+        with pytest.raises(TypeError):
+            json.dumps(object(), cls=_JsonEncoder)
+
+
+class TestWriteResultDateSerialization:
+    """write_result must not raise when RunResult contains date objects."""
+
+    def _mock_session(self):
+        session = MagicMock()
+        session.execute.return_value = None
+        session.commit.return_value = None
+        return session
+
+    def test_unexpected_sample_with_dates(self):
+        import datetime as dt
+        result = RunResult(
+            id=0,
+            rule_id=1,
+            expectation_type="expect_column_pair_values_a_to_be_greater_than_b",
+            status="fail",
+            success=False,
+            unexpected_count=2,
+            unexpected_sample=[dt.date(2020, 1, 1), dt.date(2019, 6, 15)],
+            observed_value=None,
+            error_message=None,
+        )
+        # Should not raise TypeError
+        write_result(self._mock_session(), run_id=1, rule_id=1, result=result)
+
+    def test_observed_value_with_date(self):
+        import datetime as dt
+        result = RunResult(
+            id=0,
+            rule_id=1,
+            expectation_type="expect_column_values_to_be_between",
+            status="fail",
+            success=False,
+            unexpected_count=1,
+            unexpected_sample=None,
+            observed_value={"min": dt.date(2020, 1, 1), "max": dt.date(2025, 12, 31)},
+            error_message=None,
+        )
+        write_result(self._mock_session(), run_id=1, rule_id=1, result=result)
+
+    def test_unexpected_rows_with_dates(self):
+        import datetime as dt
+        result = RunResult(
+            id=0,
+            rule_id=1,
+            expectation_type="expect_column_pair_values_a_to_be_greater_than_b",
+            status="fail",
+            success=False,
+            unexpected_count=1,
+            unexpected_sample=None,
+            observed_value=None,
+            error_message=None,
+            unexpected_rows=[
+                {"id": 42, "expiry_date": dt.date(2020, 1, 1), "effective_date": dt.date(2021, 6, 1)}
+            ],
+        )
+        write_result(self._mock_session(), run_id=1, rule_id=1, result=result)
 
 
 # ---------------------------------------------------------------------------
@@ -377,3 +474,91 @@ class TestGeEngineSQLiteSmokeTests:
         assert results[0].status == "error"
         assert results[0].success is False
         assert results[0].error_message  # non-empty string
+
+
+# ---------------------------------------------------------------------------
+# _execute_run: columns integration (get_table_columns → GeEngine.run_rules)
+# ---------------------------------------------------------------------------
+
+
+def _make_session_ctx(session_mock):
+    """Return a context-manager mock that yields session_mock."""
+    ctx = MagicMock()
+    ctx.__enter__ = MagicMock(return_value=session_mock)
+    ctx.__exit__ = MagicMock(return_value=False)
+    return ctx
+
+
+class TestExecuteRunColumnsIntegration:
+    """_execute_run must call get_table_columns and forward the result as columns=."""
+
+    def _run(self, extra_patches=None):
+        from app.api.results import _execute_run
+        from app.schemas.tables import ColumnInfo
+
+        sample_columns = [
+            ColumnInfo(name="national_id", data_type="character varying", is_nullable=False, column_default=None)
+        ]
+        session_mock = MagicMock()
+
+        ge_instance = MagicMock()
+        ge_instance.run_rules.return_value = []
+
+        patches = {
+            _P_GET_SESSION: _make_session_ctx(session_mock),
+            _P_LIST_RULES: MagicMock(return_value=[SAMPLE_RULE]),
+            _P_GET_TABLE_COLUMNS: MagicMock(return_value=sample_columns),
+            _P_GE_ENGINE: MagicMock(return_value=ge_instance),
+            _P_WRITE_RESULT: MagicMock(),
+            _P_FINALIZE_RUN: MagicMock(),
+        }
+        if extra_patches:
+            patches.update(extra_patches)
+
+        with patch(_P_GET_SESSION, return_value=_make_session_ctx(session_mock)):
+            with patch(_P_LIST_RULES, return_value=[SAMPLE_RULE]):
+                with patch(_P_GET_TABLE_COLUMNS, return_value=sample_columns) as mock_cols:
+                    with patch(_P_GE_ENGINE, return_value=ge_instance):
+                        with patch(_P_WRITE_RESULT):
+                            with patch(_P_FINALIZE_RUN):
+                                _execute_run(run_id=1, table_name="policyholders", rule_ids=None)
+
+        return ge_instance, mock_cols, sample_columns
+
+    def test_get_table_columns_is_called(self):
+        _, mock_cols, _ = self._run()
+        mock_cols.assert_called_once()
+
+    def test_columns_forwarded_to_run_rules(self):
+        ge_instance, _, sample_columns = self._run()
+        call_kwargs = ge_instance.run_rules.call_args
+        assert call_kwargs is not None
+        assert call_kwargs.kwargs.get("columns") == sample_columns
+
+    def test_run_rules_receives_correct_table_name(self):
+        ge_instance, _, _ = self._run()
+        call_args = ge_instance.run_rules.call_args
+        assert call_args.args[0] == "policyholders"
+
+    def test_finalize_success_on_no_exception(self):
+        from app.api.results import _execute_run
+        from app.schemas.tables import ColumnInfo
+
+        sample_columns = [
+            ColumnInfo(name="national_id", data_type="character varying", is_nullable=False, column_default=None)
+        ]
+        session_mock = MagicMock()
+        ge_instance = MagicMock()
+        ge_instance.run_rules.return_value = []
+
+        with patch(_P_GET_SESSION, return_value=_make_session_ctx(session_mock)):
+            with patch(_P_LIST_RULES, return_value=[SAMPLE_RULE]):
+                with patch(_P_GET_TABLE_COLUMNS, return_value=sample_columns):
+                    with patch(_P_GE_ENGINE, return_value=ge_instance):
+                        with patch(_P_WRITE_RESULT):
+                            with patch(_P_FINALIZE_RUN) as mock_finalize:
+                                _execute_run(run_id=1, table_name="policyholders", rule_ids=None)
+
+        mock_finalize.assert_called_once()
+        _, kwargs = mock_finalize.call_args
+        assert kwargs["status"] == "success"

@@ -11,6 +11,7 @@ from app.api.errors import raise_error
 from app.services.ai_generator import AiGenerator, LlmOutputError
 from app.services.db import get_db, get_session
 from app.services.ge_engine import GeEngine
+from app.services.db import get_table_columns
 from app.services.rules_store import get_rule, list_rules
 from app.services.runs_store import (
     create_run,
@@ -31,6 +32,7 @@ def _execute_run(run_id: int, table_name: str, rule_ids: list[int] | None) -> No
     with get_session() as session:
         try:
             rules = list_rules(session, table_name=table_name, rule_ids=rule_ids)
+            columns = get_table_columns(session, table_name)
             engine = GeEngine()
             engine.run_rules(
                 table_name,
@@ -39,6 +41,7 @@ def _execute_run(run_id: int, table_name: str, rule_ids: list[int] | None) -> No
                 progress_callback=lambda r: write_result(
                     session, run_id=run_id, rule_id=r.rule_id, result=r
                 ),
+                columns=columns,
             )
             finalize_run(session, run_id=run_id, status="success", error_message=None)
         except Exception as exc:

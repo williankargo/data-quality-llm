@@ -17,13 +17,14 @@ from app.schemas.explain import ChatMessage, ExplainResponse
 from app.schemas.rules import GeRule, NlRuleClarification, NlRuleResponse, NlRuleSuccess
 from app.schemas.tables import ColumnInfo
 from app.services.llm_cache import get_cached, make_cache_key, set_cached
+from app.services.type_compat import check_rule_type_compat
 
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 # Bump these whenever the corresponding prompt template file changes.
 # A version change invalidates all existing cache entries for that prompt path.
-PROMPT_VERSION_SCHEMA = "v1"
-PROMPT_VERSION_NL = "v2"       # bumped: multi-turn messages support (D#25)
+PROMPT_VERSION_SCHEMA = "v2"   # bumped: string-only expectations removed (D#B)
+PROMPT_VERSION_NL = "v3"       # bumped: type-compat warning added to prompt (D#B)
 PROMPT_VERSION_EXPLAIN = "v1"  # used in Phase 6
 
 
@@ -150,7 +151,11 @@ class AiGenerator:
             sample=sample_rows[:20],
         )
         if (cached := get_cached(session, cache_key)) is not None:
-            return [GeRule.model_validate(r) for r in cached["rules"]]
+            rules = [GeRule.model_validate(r) for r in cached["rules"]]
+            return [
+                r for r in rules
+                if check_rule_type_compat(r.expectation_type, r.kwargs, columns) is None
+            ]
 
         prompt = _load_template(
             "rule_from_schema.md",
@@ -172,6 +177,10 @@ class AiGenerator:
             messages=[{"role": "user", "content": prompt}],
         )
         rules = self._extract_and_validate_rules(response)
+        rules = [
+            r for r in rules
+            if check_rule_type_compat(r.expectation_type, r.kwargs, columns) is None
+        ]
         set_cached(
             session,
             cache_key,
@@ -195,7 +204,14 @@ class AiGenerator:
             messages=[m.model_dump() for m in messages],
         )
         if (cached := get_cached(session, cache_key)) is not None:
-            return _nl_from_cache(cached)
+            result = _nl_from_cache(cached)
+            if isinstance(result, NlRuleSuccess):
+                compat_error = check_rule_type_compat(
+                    result.rule.expectation_type, result.rule.kwargs, columns
+                )
+                if compat_error:
+                    result = NlRuleClarification(question=compat_error)
+            return result
 
         system_prompt = _load_template(
             "rule_from_nl.md",
@@ -216,6 +232,12 @@ class AiGenerator:
             messages=anthropic_messages,
         )
         result = self._dispatch_nl_response(response)
+        if isinstance(result, NlRuleSuccess):
+            compat_error = check_rule_type_compat(
+                result.rule.expectation_type, result.rule.kwargs, columns
+            )
+            if compat_error:
+                result = NlRuleClarification(question=compat_error)
         set_cached(session, cache_key, "rule_from_nl", _nl_to_cache(result))
         return result
 

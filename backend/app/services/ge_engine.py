@@ -20,8 +20,10 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.schemas.rules import RuleRecord
 from app.schemas.runs import ResultStatus, RunResult
+from app.schemas.tables import ColumnInfo
 from app.services.db import get_session
 from app.services.pk_inspector import get_pk_columns
+from app.services.type_compat import check_rule_type_compat
 
 # COMPLETE format returns partial_unexpected_index_list when
 # unexpected_index_column_names is set (D#36). Cap 1000 per D#37.
@@ -61,6 +63,7 @@ class GeEngine:
         rules: list[RuleRecord],
         session: Session | None = None,
         progress_callback: Callable[[RunResult], None] | None = None,
+        columns: list[ColumnInfo] | None = None,
     ) -> list[RunResult]:
         """Validate every rule against the table in parallel; return one RunResult per rule.
 
@@ -91,6 +94,15 @@ class GeEngine:
 
         def _run_one(rule: RuleRecord) -> RunResult:
             try:
+                # Pre-flight column type check (D#B). Catches incompatible
+                # rules that slipped through the AI layer or were saved manually.
+                if columns is not None:
+                    compat_error = check_rule_type_compat(
+                        rule.expectation_type, rule.kwargs, columns
+                    )
+                    if compat_error:
+                        raise ValueError(compat_error)
+
                 expectation = self._build_expectation(rule.expectation_type, rule.kwargs)
                 try:
                     ge_result = batch.validate(expectation, result_format=base_fmt)

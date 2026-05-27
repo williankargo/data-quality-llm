@@ -5,13 +5,27 @@ error_message for individual results is stored in raw_result JSONB
 because dq.run_results has no dedicated error_message column.
 """
 
+import datetime
+import decimal
 import json
-from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.schemas.runs import RunDetail, RunResult, RunSummary
+
+
+class _JsonEncoder(json.JSONEncoder):
+    def default(self, o: object) -> object:
+        if isinstance(o, (datetime.date, datetime.datetime)):
+            return o.isoformat()
+        if isinstance(o, decimal.Decimal):
+            return float(o)
+        return super().default(o)
+
+
+def _dumps(obj: object) -> str:
+    return json.dumps(obj, cls=_JsonEncoder)
 
 
 def create_run(session: Session, table_name: str) -> int:
@@ -83,19 +97,19 @@ def write_result(
             "success": result.success,
             "unexpected_count": result.unexpected_count,
             "unexpected_sample": (
-                json.dumps(result.unexpected_sample)
+                _dumps(result.unexpected_sample)
                 if result.unexpected_sample is not None
                 else None
             ),
             "observed_value": (
-                json.dumps(result.observed_value)
+                _dumps(result.observed_value)
                 if result.observed_value is not None
                 else None
             ),
             "raw_result": raw_result,
             "status": result.status,
             "unexpected_rows": (
-                json.dumps(result.unexpected_rows)
+                _dumps(result.unexpected_rows)
                 if result.unexpected_rows is not None
                 else None
             ),
